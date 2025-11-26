@@ -1,0 +1,1069 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "Recurrence": {
+                "type": "Recurrence",
+                "recurrence": {
+                    "interval": "@parameters('recurrence_interval')",
+                    "frequency": "@{parameters('recurrence_frequency')}",
+                    "startTime": "@{parameters('recurrence_startTime')}",
+                    "timeZone": "W. Europe Standard Time"
+                }
+            }
+        },
+        "actions": {
+            "Try": {
+                "type": "Scope",
+                "actions": {
+                    "Get_appId": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('d365fo-appid')}/value"
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs",
+                                    "outputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Get_appId_secret": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('d365fo-appsecret')}/value"
+                        },
+                        "runAfter": {
+                            "Get_appId": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs",
+                                    "outputs"
+                                ]
+                            }
+                        }
+                    },
+                    "For_each_company_list": {
+                        "type": "Foreach",
+                        "foreach": "@parameters('Company_list')",
+                        "actions": {
+                            "GET_brand_parameters": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@concat(\r\n  parameters('D365FOUrl'),\r\n  '/data/ExportBrandParameters?cross-company=true&$filter=dataAreaId eq ''',\r\n  items('For_each_company_list'),\r\n  ''''\r\n)",
+                                    "method": "GET",
+                                    "authentication": {
+                                        "type": "ActiveDirectoryOAuth",
+                                        "authority": "https://login.windows.net/",
+                                        "tenant": "@{parameters('Tenant')}",
+                                        "audience": "@{parameters('D365FOUrl')}",
+                                        "clientId": "@{body('Get_appId')?['value']}",
+                                        "secret": "@{body('Get_appId_secret')?['value']}"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Compose_FO_URL": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "contentTransfer": {
+                                        "transferMode": "Chunked"
+                                    }
+                                }
+                            },
+                            "Parse_JSON": {
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('GET_brand_parameters')",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "@@odata.context": {
+                                                "type": "string"
+                                            },
+                                            "value": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "@@odata.etag": {
+                                                            "type": "string"
+                                                        },
+                                                        "dataAreaId": {
+                                                            "type": "string"
+                                                        },
+                                                        "Brand": {
+                                                            "type": "string"
+                                                        },
+                                                        "OEMCode": {
+                                                            "type": "string"
+                                                        },
+                                                        "PaymentCodeType": {
+                                                            "type": "string"
+                                                        },
+                                                        "NationalCustomerCountry": {
+                                                            "type": "string"
+                                                        },
+                                                        "CreationExportProject": {
+                                                            "type": "string"
+                                                        },
+                                                        "CancellationExportProject": {
+                                                            "type": "string"
+                                                        },
+                                                        "Path": {
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "@@odata.etag",
+                                                        "dataAreaId",
+                                                        "Brand",
+                                                        "OEMCode",
+                                                        "PaymentCodeType",
+                                                        "NationalCustomerCountry",
+                                                        "CreationExportProject",
+                                                        "CancellationExportProject",
+                                                        "Path"
+                                                    ]
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "GET_brand_parameters": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            },
+                            "For_each_brand": {
+                                "type": "Foreach",
+                                "foreach": "@body('Parse_JSON')?['value']",
+                                "actions": {
+                                    "ExportToPackageCreation": {
+                                        "type": "Http",
+                                        "inputs": {
+                                            "uri": "@concat(parameters('D365FOURL'),'/data/DataManagementDefinitionGroups/Microsoft.Dynamics.DataEntities.ExportToPackage')",
+                                            "method": "POST",
+                                            "body": {
+                                                "definitionGroupId": "@{item()?['CreationExportProject']}",
+                                                "packageName": "@{concat(item()?['CreationExportProject'],'Package')}",
+                                                "executionId": "@{concat(item()?['CreationExportProject'],workflow().run.name)}",
+                                                "reExecute": false,
+                                                "legalEntityId": "@{items('For_each_company_list')}"
+                                            },
+                                            "authentication": {
+                                                "type": "ActiveDirectoryOAuth",
+                                                "authority": "https://login.windows.net/",
+                                                "tenant": "@{parameters('Tenant')}",
+                                                "audience": "@{parameters('D365FOURL')}",
+                                                "clientId": "@{body('Get_appId')?['value']}",
+                                                "secret": "@{body('Get_appId_secret')?['value']}"
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "CancellationCompleted": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "runtimeConfiguration": {
+                                            "contentTransfer": {
+                                                "transferMode": "Chunked"
+                                            }
+                                        }
+                                    },
+                                    "Until": {
+                                        "type": "Until",
+                                        "expression": "@equals(variables('CreationCompleted'), true)",
+                                        "limit": {
+                                            "count": 20,
+                                            "timeout": "PT1H"
+                                        },
+                                        "actions": {
+                                            "Delay": {
+                                                "type": "Wait",
+                                                "inputs": {
+                                                    "interval": {
+                                                        "count": 15,
+                                                        "unit": "Second"
+                                                    }
+                                                }
+                                            },
+                                            "GetCreationExecSummaryStatus": {
+                                                "type": "Http",
+                                                "inputs": {
+                                                    "uri": "@concat(parameters('D365FOUrl'),'/data/DataManagementDefinitionGroups/Microsoft.Dynamics.DataEntities.GetExecutionSummaryStatus')",
+                                                    "method": "POST",
+                                                    "body": {
+                                                        "executionId": "@{outputs('Creation_execution_Id')}"
+                                                    },
+                                                    "authentication": {
+                                                        "type": "ActiveDirectoryOAuth",
+                                                        "authority": "https://login.windows.net/",
+                                                        "tenant": "@{parameters('Tenant')}",
+                                                        "audience": "@{parameters('D365FOURL')}",
+                                                        "clientId": "@{body('Get_appId')?['value']}",
+                                                        "secret": "@{body('Get_appId_secret')?['value']}"
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "Delay": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "runtimeConfiguration": {
+                                                    "contentTransfer": {
+                                                        "transferMode": "Chunked"
+                                                    }
+                                                }
+                                            },
+                                            "Set_execution_status": {
+                                                "type": "SetVariable",
+                                                "inputs": {
+                                                    "name": "Execution status",
+                                                    "value": "@body('GetCreationExecSummaryStatus')?['value']"
+                                                },
+                                                "runAfter": {
+                                                    "GetCreationExecSummaryStatus": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "export_completed_check": {
+                                                "type": "If",
+                                                "expression": {
+                                                    "or": [
+                                                        {
+                                                            "equals": [
+                                                                "@variables('Execution status')",
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        {
+                                                            "equals": [
+                                                                "@variables('Execution status')",
+                                                                "Failed"
+                                                            ]
+                                                        },
+                                                        {
+                                                            "equals": [
+                                                                "@variables('Execution status')",
+                                                                "PartiallySucceeded"
+                                                            ]
+                                                        },
+                                                        {
+                                                            "equals": [
+                                                                "@variables('Execution status')",
+                                                                "Canceled"
+                                                            ]
+                                                        }
+                                                    ]
+                                                },
+                                                "actions": {
+                                                    "Set_creation_completed_true": {
+                                                        "type": "SetVariable",
+                                                        "inputs": {
+                                                            "name": "CreationCompleted",
+                                                            "value": true
+                                                        }
+                                                    }
+                                                },
+                                                "else": {
+                                                    "actions": {
+                                                        "Set_creation_completed_false": {
+                                                            "type": "SetVariable",
+                                                            "inputs": {
+                                                                "name": "CreationCompleted",
+                                                                "value": false
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "Set_execution_status": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "Creation_execution_Id": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "Creation_execution_Id": {
+                                        "type": "Compose",
+                                        "inputs": "@body('ExportToPackageCreation')?['value']",
+                                        "runAfter": {
+                                            "ExportToPackageCreation": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "ExportToPackageCancellation": {
+                                        "type": "Http",
+                                        "inputs": {
+                                            "uri": "@concat(parameters('D365FOURL'),'/data/DataManagementDefinitionGroups/Microsoft.Dynamics.DataEntities.ExportToPackage')",
+                                            "method": "POST",
+                                            "body": {
+                                                "definitionGroupId": "@{item()?['CancellationExportProject']}",
+                                                "packageName": "@{concat(item()?['CancellationExportProject'],'Package')}",
+                                                "executionId": "@{concat(item()?['CancellationExportProject'],'-',workflow().run.name)}",
+                                                "reExecute": false,
+                                                "legalEntityId": "@{items('For_each_company_list')}"
+                                            },
+                                            "authentication": {
+                                                "type": "ActiveDirectoryOAuth",
+                                                "authority": "https://login.windows.net/",
+                                                "tenant": "@{parameters('Tenant')}",
+                                                "audience": "@{parameters('D365FOUrl')}",
+                                                "clientId": "@{body('Get_appId')?['value']}",
+                                                "secret": "@{body('Get_appId_secret')?['value']}"
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "CancellationCompleted": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "runtimeConfiguration": {
+                                            "contentTransfer": {
+                                                "transferMode": "Chunked"
+                                            }
+                                        }
+                                    },
+                                    "Cancellation_execution_Id": {
+                                        "type": "Compose",
+                                        "inputs": "@body('ExportToPackageCancellation')?['value']",
+                                        "runAfter": {
+                                            "ExportToPackageCancellation": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "Until_1": {
+                                        "type": "Until",
+                                        "expression": "@equals(variables('CancellationCompleted'), true)",
+                                        "limit": {
+                                            "count": 20,
+                                            "timeout": "PT1H"
+                                        },
+                                        "actions": {
+                                            "Delay_1": {
+                                                "type": "Wait",
+                                                "inputs": {
+                                                    "interval": {
+                                                        "count": 15,
+                                                        "unit": "Second"
+                                                    }
+                                                }
+                                            },
+                                            "GetCancellationExecSummaryStatus": {
+                                                "type": "Http",
+                                                "inputs": {
+                                                    "uri": "@concat(parameters('D365FOUrl'),'/data/DataManagementDefinitionGroups/Microsoft.Dynamics.DataEntities.GetExecutionSummaryStatus')",
+                                                    "method": "POST",
+                                                    "body": {
+                                                        "executionId": "@{outputs('Cancellation_execution_Id')}"
+                                                    },
+                                                    "authentication": {
+                                                        "type": "ActiveDirectoryOAuth",
+                                                        "authority": "https://login.windows.net/",
+                                                        "tenant": "@{parameters('Tenant')}",
+                                                        "audience": "@{parameters('D365FOUrl')}",
+                                                        "clientId": "@{body('Get_appId')?['value']}",
+                                                        "secret": "@{body('Get_appId_secret')?['value']}"
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "Delay_1": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "runtimeConfiguration": {
+                                                    "contentTransfer": {
+                                                        "transferMode": "Chunked"
+                                                    }
+                                                }
+                                            },
+                                            "Set_execution_status_cancellation": {
+                                                "type": "SetVariable",
+                                                "inputs": {
+                                                    "name": "Execution status cancellation",
+                                                    "value": "@body('GetCancellationExecSummaryStatus')?['value']"
+                                                },
+                                                "runAfter": {
+                                                    "GetCancellationExecSummaryStatus": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "Check_export_completed": {
+                                                "type": "If",
+                                                "expression": {
+                                                    "or": [
+                                                        {
+                                                            "equals": [
+                                                                "@variables('Execution status cancellation')",
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        {
+                                                            "equals": [
+                                                                "@variables('Execution status cancellation')",
+                                                                "Failed"
+                                                            ]
+                                                        },
+                                                        {
+                                                            "equals": [
+                                                                "@variables('Execution status cancellation')",
+                                                                "PartiallySucceeded"
+                                                            ]
+                                                        },
+                                                        {
+                                                            "equals": [
+                                                                "@variables('Execution status cancellation')",
+                                                                "Canceled"
+                                                            ]
+                                                        }
+                                                    ]
+                                                },
+                                                "actions": {
+                                                    "Set_cancellation_completed_true": {
+                                                        "type": "SetVariable",
+                                                        "inputs": {
+                                                            "name": "CancellationCompleted",
+                                                            "value": true
+                                                        }
+                                                    }
+                                                },
+                                                "else": {
+                                                    "actions": {
+                                                        "Set_cancellation_completed_false": {
+                                                            "type": "SetVariable",
+                                                            "inputs": {
+                                                                "name": "CancellationCompleted",
+                                                                "value": false
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "Set_execution_status_cancellation": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "Cancellation_execution_Id": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "Check_execution_status": {
+                                        "type": "If",
+                                        "expression": {
+                                            "and": [
+                                                {
+                                                    "equals": [
+                                                        "@variables('Execution status')",
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            ]
+                                        },
+                                        "actions": {
+                                            "GetCreationPackageURL": {
+                                                "type": "Http",
+                                                "inputs": {
+                                                    "uri": "@concat(parameters('D365FOURL'),'/data/DataManagementDefinitionGroups/Microsoft.Dynamics.DataEntities.GetExportedPackageUrl')",
+                                                    "method": "POST",
+                                                    "body": {
+                                                        "executionId": "@{outputs('Creation_execution_Id')}"
+                                                    },
+                                                    "authentication": {
+                                                        "type": "ActiveDirectoryOAuth",
+                                                        "authority": "https://login.windows.net/",
+                                                        "tenant": "@{parameters('Tenant')}",
+                                                        "audience": "@{parameters('D365FOURL')}",
+                                                        "clientId": "@{body('Get_appId')?['value']}",
+                                                        "secret": "@{body('Get_appId_secret')?['value']}"
+                                                    }
+                                                },
+                                                "runtimeConfiguration": {
+                                                    "contentTransfer": {
+                                                        "transferMode": "Chunked"
+                                                    }
+                                                }
+                                            },
+                                            "download_file": {
+                                                "type": "Http",
+                                                "inputs": {
+                                                    "uri": "@{body('GetCreationPackageURL')?['value']}",
+                                                    "method": "GET"
+                                                },
+                                                "runAfter": {
+                                                    "GetCreationPackageURL": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "runtimeConfiguration": {
+                                                    "contentTransfer": {
+                                                        "transferMode": "Chunked"
+                                                    }
+                                                }
+                                            },
+                                            "Create_package_file": {
+                                                "type": "ApiConnection",
+                                                "inputs": {
+                                                    "host": {
+                                                        "connection": {
+                                                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                        }
+                                                    },
+                                                    "method": "post",
+                                                    "body": "@body('download_file')",
+                                                    "headers": {
+                                                        "ReadFileMetadataFromServer": true
+                                                    },
+                                                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('storage account')))}/files",
+                                                    "queries": {
+                                                        "folderPath": "@concat('/',parameters('sa_rfia_container'),'/',parameters('bs_export_rootfolder'),items('For_each_company_list'),parameters('bs_rfia_zipsubfolder'),item()?['Brand'])",
+                                                        "name": "@concat(outputs('Creation_execution_Id'),'.zip')",
+                                                        "queryParametersSingleEncoded": true
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "download_file": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "runtimeConfiguration": {
+                                                    "contentTransfer": {
+                                                        "transferMode": "Chunked"
+                                                    }
+                                                }
+                                            },
+                                            "Odata_action_creation": {
+                                                "type": "Http",
+                                                "inputs": {
+                                                    "uri": "@concat(parameters('D365FOUrl'),'/data/RFIAExport/Microsoft.Dynamics.DataEntities.updateRFIACreationExport')",
+                                                    "method": "POST",
+                                                    "body": {
+                                                        "_executionId": "@{outputs('Creation_execution_Id')}"
+                                                    },
+                                                    "authentication": {
+                                                        "type": "ActiveDirectoryOAuth",
+                                                        "authority": "https://login.windows.net/",
+                                                        "tenant": "@{parameters('Tenant')}",
+                                                        "audience": "@{parameters('D365FOUrl')}",
+                                                        "clientId": "@{body('Get_appId')?['value']}",
+                                                        "secret": "@{body('Get_appId_secret')?['value']}"
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "Create_package_file": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "runtimeConfiguration": {
+                                                    "contentTransfer": {
+                                                        "transferMode": "Chunked"
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "else": {
+                                            "actions": {
+                                                "Send_an_email_(V2)_1": {
+                                                    "type": "ApiConnection",
+                                                    "inputs": {
+                                                        "host": {
+                                                            "connection": {
+                                                                "name": "@parameters('$connections')['office365']['connectionId']"
+                                                            }
+                                                        },
+                                                        "method": "post",
+                                                        "body": {
+                                                            "To": "@body('Get_notification_list')?['value']",
+                                                            "Subject": "Notifications - Logic App FAILED - @{workflow().name}",
+                                                            "Body": "<p class=\"editor-paragraph\">Logic App Run Failed<br><br>Run Id: @{concat('https://portal.azure.com/#blade/Microsoft_Azure_EMA/LogicAppsMonitorBlade/runid/', encodeUriComponent(workflow().run.id))}<br>When: @{utcNow()}<br><br>The DMF import has failed.<br>Execution ID: @{outputs('Creation_execution_Id')}<br>You can review the job in Dynamics 365 Finance &amp; Operations here:<br>@{outputs('Compose_FO_URL')}</p>",
+                                                            "Importance": "Normal"
+                                                        },
+                                                        "path": "/v2/Mail"
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "Until": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "Check_execution_status_cancelled": {
+                                        "type": "If",
+                                        "expression": {
+                                            "and": [
+                                                {
+                                                    "equals": [
+                                                        "@variables('Execution status cancellation')",
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            ]
+                                        },
+                                        "actions": {
+                                            "GetCancellationPackageURL": {
+                                                "type": "Http",
+                                                "inputs": {
+                                                    "uri": "@concat(parameters('D365FOURL'),'/data/DataManagementDefinitionGroups/Microsoft.Dynamics.DataEntities.GetExportedPackageUrl')",
+                                                    "method": "POST",
+                                                    "body": {
+                                                        "executionId": "@{outputs('Cancellation_execution_Id')}"
+                                                    },
+                                                    "authentication": {
+                                                        "type": "ActiveDirectoryOAuth",
+                                                        "authority": "https://login.windows.net/",
+                                                        "tenant": "@{parameters('Tenant')}",
+                                                        "audience": "@{parameters('D365FOUrl')}",
+                                                        "clientId": "@{body('Get_appId')?['value']}",
+                                                        "secret": "@{body('Get_appId_secret')?['value']}"
+                                                    }
+                                                },
+                                                "runtimeConfiguration": {
+                                                    "contentTransfer": {
+                                                        "transferMode": "Chunked"
+                                                    }
+                                                }
+                                            },
+                                            "download_cancelled_file": {
+                                                "type": "Http",
+                                                "inputs": {
+                                                    "uri": "@body('GetCancellationPackageURL')?['value']",
+                                                    "method": "GET"
+                                                },
+                                                "runAfter": {
+                                                    "GetCancellationPackageURL": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "runtimeConfiguration": {
+                                                    "contentTransfer": {
+                                                        "transferMode": "Chunked"
+                                                    }
+                                                }
+                                            },
+                                            "Create_package": {
+                                                "type": "ApiConnection",
+                                                "inputs": {
+                                                    "host": {
+                                                        "connection": {
+                                                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                        }
+                                                    },
+                                                    "method": "post",
+                                                    "body": "@body('download_cancelled_file')",
+                                                    "headers": {
+                                                        "ReadFileMetadataFromServer": true
+                                                    },
+                                                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('storage account')))}/files",
+                                                    "queries": {
+                                                        "folderPath": "@concat('/',parameters('sa_rfia_container'),'/',parameters('bs_export_rootfolder'),items('For_each_company_list'),parameters('bs_rfia_zipsubfolder'),item()?['Brand'])",
+                                                        "name": "@concat(outputs('Cancellation_execution_Id'),'.zip')",
+                                                        "queryParametersSingleEncoded": true
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "download_cancelled_file": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "runtimeConfiguration": {
+                                                    "contentTransfer": {
+                                                        "transferMode": "Chunked"
+                                                    }
+                                                }
+                                            },
+                                            "Odata_action_cancellation_": {
+                                                "type": "Http",
+                                                "inputs": {
+                                                    "uri": "@concat(parameters('D365FOUrl'),'/data/RFIAExport/Microsoft.Dynamics.DataEntities.updateRFIACancellationExport')",
+                                                    "method": "POST",
+                                                    "body": {
+                                                        "_executionId": "@{outputs('Cancellation_execution_Id')}"
+                                                    },
+                                                    "authentication": {
+                                                        "type": "ActiveDirectoryOAuth",
+                                                        "authority": "https://login.windows.net/",
+                                                        "tenant": "@{parameters('Tenant')}",
+                                                        "audience": "@{parameters('D365FOUrl')}",
+                                                        "clientId": "@{body('Get_appId')?['value']}",
+                                                        "secret": "@{body('Get_appId_secret')?['value']}"
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "Create_package": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "runtimeConfiguration": {
+                                                    "contentTransfer": {
+                                                        "transferMode": "Chunked"
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "else": {
+                                            "actions": {
+                                                "Send_an_email_(V2)_2": {
+                                                    "type": "ApiConnection",
+                                                    "inputs": {
+                                                        "host": {
+                                                            "connection": {
+                                                                "name": "@parameters('$connections')['office365']['connectionId']"
+                                                            }
+                                                        },
+                                                        "method": "post",
+                                                        "body": {
+                                                            "To": "@body('Get_notification_list')?['value']",
+                                                            "Subject": "Notifications - Logic App FAILED - @{workflow().name}",
+                                                            "Body": "<p class=\"editor-paragraph\">Logic App Run Failed<br><br>Run Id: @{concat('https://portal.azure.com/#blade/Microsoft_Azure_EMA/LogicAppsMonitorBlade/runid/', encodeUriComponent(workflow().run.id))}<br>When: @{utcNow()}<br><br>The DMF import has failed.<br>Execution ID: @{outputs('Cancellation_execution_Id')}<br>You can review the job in Dynamics 365 Finance &amp; Operations here:<br>@{outputs('Compose_FO_URL')}</p>",
+                                                            "Importance": "Normal"
+                                                        },
+                                                        "path": "/v2/Mail"
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "Until_1": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "ExeStatus": {
+                                        "type": "SetVariable",
+                                        "inputs": {
+                                            "name": "Execution status",
+                                            "value": "NotRun"
+                                        }
+                                    },
+                                    "StatusCancel": {
+                                        "type": "SetVariable",
+                                        "inputs": {
+                                            "name": "Execution status cancellation",
+                                            "value": "NotRun"
+                                        },
+                                        "runAfter": {
+                                            "ExeStatus": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "CreationCompleted": {
+                                        "type": "SetVariable",
+                                        "inputs": {
+                                            "name": "CreationCompleted",
+                                            "value": false
+                                        },
+                                        "runAfter": {
+                                            "StatusCancel": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "CancellationCompleted": {
+                                        "type": "SetVariable",
+                                        "inputs": {
+                                            "name": "CancellationCompleted",
+                                            "value": false
+                                        },
+                                        "runAfter": {
+                                            "CreationCompleted": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "Parse_JSON": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "concurrency": {
+                                        "repetitions": 1
+                                    }
+                                }
+                            },
+                            "Compose_FO_URL": {
+                                "type": "Compose",
+                                "inputs": "@concat(parameters('D365FOURL'),'/?mi=DMFStagingExecutionHistory&cmp=',items('For_each_company_list'))"
+                            }
+                        },
+                        "runAfter": {
+                            "Get_notification_list": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "concurrency": {
+                                "repetitions": 1
+                            }
+                        }
+                    },
+                    "Get_notification_list": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('notification-distribution-list')}/value"
+                        },
+                        "runAfter": {
+                            "Get_appId_secret": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs",
+                                    "outputs"
+                                ]
+                            }
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Initialize_variables": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Catch": {
+                "type": "Scope",
+                "actions": {
+                    "Get_secret": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('notification-distribution-list')}/value"
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs",
+                                    "outputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Compose_runId_url": {
+                        "type": "Compose",
+                        "inputs": "@concat('https://portal.azure.com/#blade/Microsoft_Azure_EMA/LogicAppsMonitorBlade/runid/', encodeUriComponent(workflow().run.id))",
+                        "runAfter": {
+                            "Get_secret": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Filter_array": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@result('Try')",
+                            "where": "@or(equals(item()?['status'],'Failed'), equals(item()?['status'],'TimedOut'), equals(item()?['status'],'Skipped'))"
+                        },
+                        "runAfter": {
+                            "Compose_runId_url": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Send_an_email_(V2)": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['office365']['connectionId']"
+                                }
+                            },
+                            "method": "post",
+                            "body": {
+                                "To": "@body('Get_secret')?['value']",
+                                "Subject": "Notifications - Logic App FAILED - @{workflow().name}",
+                                "Body": "<p class=\"editor-paragraph\">Logic App Run Failed<br><br>Run Id: @{outputs('Compose_runId_url')}<br>When: @{utcNow()}<br><br>Failed actions:@{ body('Filter_array')?[0]?['error']?['message']}</p>",
+                                "Importance": "Normal"
+                            },
+                            "path": "/v2/Mail"
+                        },
+                        "runAfter": {
+                            "Filter_array": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Terminate": {
+                        "type": "Terminate",
+                        "inputs": {
+                            "runStatus": "Failed"
+                        },
+                        "runAfter": {
+                            "Send_an_email_(V2)": [
+                                "Succeeded"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Try": [
+                        "Skipped",
+                        "Failed",
+                        "TimedOut"
+                    ]
+                }
+            },
+            "Initialize_variables": {
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "Execution status",
+                            "type": "string",
+                            "value": "NotRun"
+                        },
+                        {
+                            "name": "Execution status cancellation",
+                            "type": "string",
+                            "value": "NotRun"
+                        },
+                        {
+                            "name": "CreationCompleted",
+                            "type": "boolean",
+                            "value": false
+                        },
+                        {
+                            "name": "CancellationCompleted",
+                            "type": "boolean",
+                            "value": false
+                        }
+                    ]
+                },
+                "runAfter": {}
+            }
+        },
+        "outputs": {},
+        "parameters": {
+            "D365FOUrl": {
+                "defaultValue": "https://atf-a365-cst.sandbox.operations.eu.dynamics.com",
+                "type": "String"
+            },
+            "Tenant": {
+                "defaultValue": "6cfb5c6a-c8a6-4e24-a04c-a65e7a7e5d7d",
+                "type": "String"
+            },
+            "Company_list": {
+                "defaultValue": [
+                    "A010"
+                ],
+                "type": "Array"
+            },
+            "sa_rfia_container": {
+                "defaultValue": "dynamics365fodataexchange",
+                "type": "String"
+            },
+            "storage account": {
+                "defaultValue": "atfa365sacst01",
+                "type": "String"
+            },
+            "bs_rfia_zipsubfolder": {
+                "defaultValue": "/RFIA/RFIAZipFiles/",
+                "type": "String"
+            },
+            "bs_export_rootfolder": {
+                "defaultValue": "Export/",
+                "type": "String"
+            },
+            "recurrence_interval": {
+                "defaultValue": "10",
+                "type": "String"
+            },
+            "recurrence_frequency": {
+                "defaultValue": "Minute",
+                "type": "String"
+            },
+            "recurrence_startTime": {
+                "defaultValue": "2025-11-11T08:00:00Z",
+                "type": "String"
+            },
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "keyvault": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/keyvault",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/keyvault-1",
+                    "connectionName": "keyvault",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "azureblob": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/azureblob",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/azureblob-2",
+                    "connectionName": "azureblob",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "office365": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/office365",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/office365-2",
+                    "connectionName": "office365",
+                    "connectionProperties": {}
+                }
+            }
+        }
+    }
+}
