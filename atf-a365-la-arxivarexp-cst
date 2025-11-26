@@ -1,0 +1,509 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "Recurrence": {
+                "type": "Recurrence",
+                "recurrence": {
+                    "interval": "@parameters('recurrence_interval')",
+                    "frequency": "@{parameters('recurrence_frequency')}",
+                    "startTime": "@{parameters('recurrence_startTime')}",
+                    "timeZone": "W. Europe Standard Time"
+                }
+            }
+        },
+        "actions": {
+            "Try": {
+                "type": "Scope",
+                "actions": {
+                    "For_each_company_list": {
+                        "type": "Foreach",
+                        "foreach": "@parameters('Company_List')",
+                        "actions": {
+                            "For_each_folder_mapping": {
+                                "type": "Foreach",
+                                "foreach": "@parameters('Folder mappings')",
+                                "actions": {
+                                    "List_folder": {
+                                        "type": "ApiConnection",
+                                        "inputs": {
+                                            "host": {
+                                                "connection": {
+                                                    "name": "@parameters('$connections')['sharepointonline-2']['connectionId']"
+                                                }
+                                            },
+                                            "method": "get",
+                                            "path": "/datasets/@{encodeURIComponent(encodeURIComponent('https://gruppoautotorino.sharepoint.com/teams/atflow-a365-test'))}/folders/@{encodeURIComponent(outputs('Compose_sharepoint_path'))}"
+                                        },
+                                        "runAfter": {
+                                            "Compose_sharepoint_path": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "metadata": {
+                                            "%252fShared%2bDocuments": "/Shared Documents",
+                                            "%252fShared%2bDocuments%252fDEV%252fDiventa%252fArxivar": "/Shared Documents/DEV/Diventa/Arxivar",
+                                            "%252fShared%2bDocuments%252fDEV%252fDiventa%252fArxivar%252fSLS_EInvoice": "/Shared Documents/DEV/Diventa/Arxivar/SLS_EInvoice",
+                                            "%252fShared%2bDocuments%252fDEV": "/Shared Documents/DEV"
+                                        }
+                                    },
+                                    "For_each_list_folder": {
+                                        "type": "Foreach",
+                                        "foreach": "@body('List_folder')",
+                                        "actions": {
+                                            "Get_file_content": {
+                                                "type": "ApiConnection",
+                                                "inputs": {
+                                                    "host": {
+                                                        "connection": {
+                                                            "name": "@parameters('$connections')['sharepointonline-2']['connectionId']"
+                                                        }
+                                                    },
+                                                    "method": "get",
+                                                    "path": "/datasets/@{encodeURIComponent(encodeURIComponent('https://gruppoautotorino.sharepoint.com/teams/atflow-a365-test'))}/files/@{encodeURIComponent(item()?['Id'])}/content",
+                                                    "queries": {
+                                                        "inferContentType": true
+                                                    }
+                                                }
+                                            },
+                                            "Compose_ftp_path": {
+                                                "type": "Compose",
+                                                "inputs": "@concat(\r\n  items('For_each_company_list'),\r\n  items('For_each_folder_mapping')?['ftp'])",
+                                                "runAfter": {
+                                                    "Get_file_content": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "Create_file": {
+                                                "type": "ApiConnection",
+                                                "inputs": {
+                                                    "host": {
+                                                        "connection": {
+                                                            "name": "@parameters('$connections')['ftp']['connectionId']"
+                                                        }
+                                                    },
+                                                    "method": "post",
+                                                    "body": "@body('Get_file_content')",
+                                                    "headers": {
+                                                        "ReadFileMetadataFromServer": true
+                                                    },
+                                                    "path": "/datasets/default/files",
+                                                    "queries": {
+                                                        "folderPath": "@{outputs('Compose_ftp_path')}",
+                                                        "name": "@{outputs('Compose_ftp_file_name')}",
+                                                        "queryParametersSingleEncoded": true
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "sharepoint_file_size": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "runtimeConfiguration": {
+                                                    "contentTransfer": {
+                                                        "transferMode": "Chunked"
+                                                    }
+                                                }
+                                            },
+                                            "sharepoint_file_size": {
+                                                "type": "Compose",
+                                                "inputs": "@body('Get_file_metadata')?['Size']",
+                                                "runAfter": {
+                                                    "Get_file_metadata": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "ftp_file_size": {
+                                                "type": "Compose",
+                                                "inputs": "@body('Create_file')?['Size']",
+                                                "runAfter": {
+                                                    "Create_file": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "Condition": {
+                                                "type": "If",
+                                                "expression": {
+                                                    "and": [
+                                                        {
+                                                            "equals": [
+                                                                "@outputs('sharepoint_file_size')",
+                                                                "@outputs('ftp_file_size')"
+                                                            ]
+                                                        }
+                                                    ]
+                                                },
+                                                "actions": {
+                                                    "Copy_file": {
+                                                        "type": "ApiConnection",
+                                                        "inputs": {
+                                                            "host": {
+                                                                "connection": {
+                                                                    "name": "@parameters('$connections')['ftp']['connectionId']"
+                                                                }
+                                                            },
+                                                            "method": "post",
+                                                            "headers": {
+                                                                "ReadFileMetadataFromServer": true
+                                                            },
+                                                            "path": "/datasets/default/copyFile",
+                                                            "queries": {
+                                                                "source": "@body('Create_file')?['Path']",
+                                                                "destination": "@concat(outputs('Compose_ftp_path'),'/',item()?['Name'])",
+                                                                "overwrite": true,
+                                                                "queryParametersSingleEncoded": true
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "else": {
+                                                    "actions": {
+                                                        "Until": {
+                                                            "type": "Until",
+                                                            "expression": "@equals(outputs('sharepoint_file_size'), outputs('ftp_file_size'))",
+                                                            "limit": {
+                                                                "count": 3,
+                                                                "timeout": "PT1H"
+                                                            },
+                                                            "actions": {
+                                                                "Delay": {
+                                                                    "type": "Wait",
+                                                                    "inputs": {
+                                                                        "interval": {
+                                                                            "count": 15,
+                                                                            "unit": "Second"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "Copy_file_retry": {
+                                                                    "type": "ApiConnection",
+                                                                    "inputs": {
+                                                                        "host": {
+                                                                            "connection": {
+                                                                                "name": "@parameters('$connections')['ftp']['connectionId']"
+                                                                            }
+                                                                        },
+                                                                        "method": "post",
+                                                                        "headers": {
+                                                                            "ReadFileMetadataFromServer": true
+                                                                        },
+                                                                        "path": "/datasets/default/copyFile",
+                                                                        "queries": {
+                                                                            "source": "@body('Create_file')?['Path']",
+                                                                            "destination": "@concat(outputs('Compose_ftp_path'),'/',item()?['Name'])",
+                                                                            "overwrite": true,
+                                                                            "queryParametersSingleEncoded": true
+                                                                        }
+                                                                    },
+                                                                    "runAfter": {
+                                                                        "Delay": [
+                                                                            "Succeeded"
+                                                                        ]
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "ftp_file_size": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "Compose_ftp_file_name": {
+                                                "type": "Compose",
+                                                "inputs": "@concat(item()?['Name'],'.uploading')",
+                                                "runAfter": {
+                                                    "Compose_ftp_path": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "Get_file_metadata": {
+                                                "type": "ApiConnection",
+                                                "inputs": {
+                                                    "host": {
+                                                        "connection": {
+                                                            "name": "@parameters('$connections')['sharepointonline-2']['connectionId']"
+                                                        }
+                                                    },
+                                                    "method": "get",
+                                                    "path": "/datasets/@{encodeURIComponent(encodeURIComponent('https://gruppoautotorino.sharepoint.com/teams/atflow-a365-test'))}/files/@{encodeURIComponent(item()?['Id'])}"
+                                                },
+                                                "runAfter": {
+                                                    "Compose_ftp_file_name": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "Move_file": {
+                                                "type": "ApiConnection",
+                                                "inputs": {
+                                                    "host": {
+                                                        "connection": {
+                                                            "name": "@parameters('$connections')['sharepointonline-2']['connectionId']"
+                                                        }
+                                                    },
+                                                    "method": "post",
+                                                    "body": {
+                                                        "sourceFileId": "@item()?['Id']",
+                                                        "destinationDataset": "https://gruppoautotorino.sharepoint.com/teams/atflow-a365-test",
+                                                        "destinationFolderPath": "@{outputs('Compose_archive_file_path')}",
+                                                        "nameConflictBehavior": 1
+                                                    },
+                                                    "path": "/datasets/@{encodeURIComponent(encodeURIComponent('https://gruppoautotorino.sharepoint.com/teams/atflow-a365-test'))}/moveFileAsync"
+                                                },
+                                                "runAfter": {
+                                                    "Compose_archive_file_path": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "Compose_archive_file_path": {
+                                                "type": "Compose",
+                                                "inputs": "@  concat(\r\n        parameters('Sp_rootfolder_path'),\r\n        parameters('Sp_Environment_folder_path'),\r\n        items('For_each_company_list'),\r\n        items('For_each_folder_mapping')?['archive']\r\n    )",
+                                                "runAfter": {
+                                                    "Delete_file": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "Delete_file": {
+                                                "type": "ApiConnection",
+                                                "inputs": {
+                                                    "host": {
+                                                        "connection": {
+                                                            "name": "@parameters('$connections')['ftp']['connectionId']"
+                                                        }
+                                                    },
+                                                    "method": "delete",
+                                                    "headers": {
+                                                        "SkipDeleteIfFileNotFoundOnServer": false
+                                                    },
+                                                    "path": "/datasets/default/files/@{encodeURIComponent(encodeURIComponent(concat(outputs('Compose_ftp_path'),'/',outputs('Compose_ftp_file_name'))))}"
+                                                },
+                                                "runAfter": {
+                                                    "Condition": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "List_folder": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "runtimeConfiguration": {
+                                            "concurrency": {
+                                                "repetitions": 1
+                                            }
+                                        }
+                                    },
+                                    "Compose_sharepoint_path": {
+                                        "type": "Compose",
+                                        "inputs": "@encodeUriComponent(\r\n    concat(\r\n        parameters('Sp_rootfolder_path'),\r\n        parameters('Sp_Environment_folder_path'),\r\n        items('For_each_company_list'),\r\n        items('For_each_folder_mapping')?['sharepoint']\r\n    )\r\n)"
+                                    }
+                                },
+                                "runtimeConfiguration": {
+                                    "concurrency": {
+                                        "repetitions": 1
+                                    }
+                                }
+                            }
+                        },
+                        "runtimeConfiguration": {
+                            "concurrency": {
+                                "repetitions": 1
+                            }
+                        }
+                    }
+                },
+                "runAfter": {}
+            },
+            "Catch": {
+                "type": "Scope",
+                "actions": {
+                    "Filter_array": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@result('Try')",
+                            "where": "@or(equals(item()?['status'],'Failed'), equals(item()?['status'],'TimedOut'), equals(item()?['status'],'Skipped'))\r\n"
+                        },
+                        "runAfter": {
+                            "Compose_runIdURL": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Send_an_email_(V2)": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['office365']['connectionId']"
+                                }
+                            },
+                            "method": "post",
+                            "body": {
+                                "To": "@body('Get_secret')?['value']",
+                                "Subject": "Notifications - Logic App FAILED - @{workflow().name}",
+                                "Body": "<p class=\"editor-paragraph\"><b><strong class=\"editor-text-bold\">Logic App Run Failed</strong></b></p><p class=\"editor-paragraph\"><br><b><strong class=\"editor-text-bold\">Run Id: </strong></b>@{outputs('Compose_runIdURL')}<br><b><strong class=\"editor-text-bold\">When:</strong></b>  @{utcNow()}<br><br><b><strong class=\"editor-text-bold\">Failed actions:</strong></b>@{ body('Filter_array')?[0]?['error']?['message']}</p>",
+                                "Importance": "Normal"
+                            },
+                            "path": "/v2/Mail"
+                        },
+                        "runAfter": {
+                            "Filter_array": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Compose_runIdURL": {
+                        "type": "Compose",
+                        "inputs": "@concat('https://portal.azure.com/#blade/Microsoft_Azure_EMA/LogicAppsMonitorBlade/runid/', encodeUriComponent(workflow().run.id))",
+                        "runAfter": {
+                            "Get_secret": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Get_secret": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('notification-distribution-list')}/value"
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs",
+                                    "outputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Terminate": {
+                        "type": "Terminate",
+                        "inputs": {
+                            "runStatus": "Failed"
+                        },
+                        "runAfter": {
+                            "Send_an_email_(V2)": [
+                                "Succeeded"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Try": [
+                        "Failed",
+                        "TimedOut"
+                    ]
+                }
+            }
+        },
+        "outputs": {},
+        "parameters": {
+            "Sp_rootfolder_path": {
+                "defaultValue": "/Shared Documents/",
+                "type": "String"
+            },
+            "Sp_Environment_folder_path": {
+                "defaultValue": "CST/",
+                "type": "String"
+            },
+            "Company_List": {
+                "defaultValue": [
+                    "Diventa"
+                ],
+                "type": "Array"
+            },
+            "Folder mappings": {
+                "defaultValue": [
+                    {
+                        "sharepoint": "/Arxivar/SLS_EInvoice",
+                        "ftp": "/D365ARX/Attivo",
+                        "archive": "/Arxivar/archive/SLS_EInvoice"
+                    },
+                    {
+                        "sharepoint": "/Arxivar/PUR_EInvoice",
+                        "ftp": "/D365ARX/Passivo",
+                        "archive": "/Arxivar/archive/PUR_EInvoice"
+                    },
+                    {
+                        "sharepoint": "/Arxivar/PACKS",
+                        "ftp": "/D365ARX/DDT",
+                        "archive": "/Arxivar/archive/PACKS"
+                    }
+                ],
+                "type": "Array"
+            },
+            "Site address": {
+                "defaultValue": "https://gruppoautotorino.sharepoint.com/teams/atflow-a365-test",
+                "type": "String"
+            },
+            "recurrence_interval": {
+                "defaultValue": "10",
+                "type": "String"
+            },
+            "recurrence_frequency": {
+                "defaultValue": "Minute",
+                "type": "String"
+            },
+            "recurrence_startTime": {
+                "defaultValue": "2025-11-11T08:00:00Z",
+                "type": "String"
+            },
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "sharepointonline-2": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/sharepointonline",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/sharepointonline-1",
+                    "connectionName": "sharepointonline-2",
+                    "connectionProperties": {}
+                },
+                "ftp": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/ftp",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/ftp",
+                    "connectionName": "ftp",
+                    "connectionProperties": {}
+                },
+                "office365": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/office365",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/office365-2",
+                    "connectionName": "office365",
+                    "connectionProperties": {}
+                },
+                "keyvault": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/keyvault",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/keyvault-1",
+                    "connectionName": "keyvault",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
