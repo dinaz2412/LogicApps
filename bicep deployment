@@ -1,0 +1,65 @@
+This guide explains how to extract the Bicep code for an existing Logic App, structure it for Infrastructure as Code (IaC), and enable deployment across multiple environments with configurable parameters.
+
+1 - Export the Logic App as Bicep
+Navigate to your Logic App resource in the Azure Portal.
+
+In the Automation section, select Export template and choose Bicep format.
+
+The exported Bicep file will be split into:
+
+Parameters: automatically generated inputs (e.g., Logic App name, connections).
+
+Resources: the main Logic App definition (workflow body).
+
+What to do next:
+
+Add the exported parameters to your main.bicep.
+
+Verify that any connections (e.g., API Connections, Function App connections) already exist in your environment or are being deployed separately. The exported Bicep file assumes they are present.
+
+Copy the Logic App body into a new bicep file. The new file will be placed under logicapps folder. In the main.bicep file it's necessary to add a new module call to the new logic app
+
+parameters are valued into the parameter files, not in the main or module files. This enforces they must be rewritten by purpose for each environment.
+
+------------------------------------------------------------------------------
+2 - Add a Deployment Toggle (Enable/Disable Flag)
+You may not want to deploy the Logic App in every environment. To handle this:
+
+Define a boolean parameter in your Bicep file, for example:
+
+param deployLogicApp bool = true
+
+Wrap the Logic App resource definition in a conditional deployment:
+
+resource logicApp 'Microsoft.Logic/workflows@2019-05-01' = if (deployLogicApp) { name: logicAppName location: resourceGroup().location properties: { definition: workflowBody parameters: workflowParameters } }
+
+In each environment parameter file, set deployLogicApp to true or false depending on whether the Logic App should be deployed.
+
+do the same thing to enable/disable the logic app running (it should be a string with possible values "Enabled" or "Disabled"
+
+3 - Externalize and Organize Parameters
+Logic Apps often include values that vary per environment (dev, test, prd). Extract them into parameters:
+
+Logic App-specific parameters (e.g. folder path)
+Global (environment-level) parameters (e.g. F&O URL)
+Best practices:
+
+Store environment-specific values in parameter files.
+
+Use secure parameters for sensitive values (e.g., secrets) and retrieve them from Key Vault.
+
+4 - Update and Maintain Logic App Definitions
+Once the Logic App is under IaC management, the most common changes happen in:
+
+Triggers: e.g., adjusting recurrence schedules, API endpoints.
+
+Actions: e.g., adding or modifying steps, updating request/response schemas.
+
+When making updates:
+
+Export it again and update triggers and actions sections.
+
+If new environment-dependent values are introduced, remember to:
+
+Add them as parameters in the Bicep files.
+Update all relevant environment parameter files.
