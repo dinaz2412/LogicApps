@@ -1,0 +1,792 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "Recurrence": {
+                "type": "Recurrence",
+                "recurrence": {
+                    "interval": "@parameters('recurrence_interval')",
+                    "frequency": "@{parameters('recurrence_frequency')}",
+                    "startTime": "@{parameters('recurrence_startTime')}",
+                    "timeZone": "W. Europe Standard Time"
+                }
+            }
+        },
+        "actions": {
+            "Try": {
+                "type": "Scope",
+                "actions": {
+                    "For_each_company": {
+                        "type": "Foreach",
+                        "foreach": "@parameters('company_list')",
+                        "actions": {
+                            "Get_brand_parameters": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@concat(\r\n  parameters('D365FOUrl'),\r\n  '/data/ExportBrandParameters?cross-company=true&$filter=dataAreaId eq ''',\r\n items('For_each_company'),\r\n  ''''\r\n)",
+                                    "method": "GET",
+                                    "authentication": {
+                                        "type": "ActiveDirectoryOAuth",
+                                        "authority": "https://login.windows.net/",
+                                        "tenant": "@{parameters('tenant')}",
+                                        "audience": "@{parameters('D365FOUrl')}",
+                                        "clientId": "@{body('Get_clientid')?['value']}",
+                                        "secret": "@{body('Get_client_secret')?['value']}"
+                                    }
+                                },
+                                "runtimeConfiguration": {
+                                    "contentTransfer": {
+                                        "transferMode": "Chunked"
+                                    }
+                                }
+                            },
+                            "Parse_JSON": {
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('Get_brand_parameters')",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "@@odata.context": {
+                                                "type": "string"
+                                            },
+                                            "value": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "@@odata.etag": {
+                                                            "type": "string"
+                                                        },
+                                                        "dataAreaId": {
+                                                            "type": "string"
+                                                        },
+                                                        "Brand": {
+                                                            "type": "string"
+                                                        },
+                                                        "OEMCode": {
+                                                            "type": "string"
+                                                        },
+                                                        "PaymentCodeType": {
+                                                            "type": "string"
+                                                        },
+                                                        "NationalCustomerCountry": {
+                                                            "type": "string"
+                                                        },
+                                                        "CreationExportProject": {
+                                                            "type": "string"
+                                                        },
+                                                        "CancellationExportProject": {
+                                                            "type": "string"
+                                                        },
+                                                        "Path": {
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "@@odata.etag",
+                                                        "dataAreaId",
+                                                        "Brand",
+                                                        "OEMCode",
+                                                        "PaymentCodeType",
+                                                        "NationalCustomerCountry",
+                                                        "CreationExportProject",
+                                                        "CancellationExportProject",
+                                                        "Path"
+                                                    ]
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "Get_brand_parameters": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            },
+                            "For_each": {
+                                "type": "Foreach",
+                                "foreach": "@body('Parse_JSON')?['value']",
+                                "actions": {
+                                    "List_all_zip_files": {
+                                        "type": "ApiConnection",
+                                        "inputs": {
+                                            "host": {
+                                                "connection": {
+                                                    "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                }
+                                            },
+                                            "method": "get",
+                                            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('rfia_storage_account')))}/foldersV2/@{encodeURIComponent(encodeURIComponent(concat('/',parameters('sa_rfia_container'),'/',parameters('bs_export_rootfolder'),items('For_each_company'),parameters('bs_rfia_zipsubfolder'),item()?['Brand'])))}",
+                                            "queries": {
+                                                "nextPageMarker": ""
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "Compose_Brand": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "metadata": {
+                                            "JTJmZHluYW1pY3MzNjVmb2RhdGFleGNoYW5nZSUyZkV4cG9ydCUyZkEwMTAlMmZSRklBJTJmUkZJQVppcEZpbGVzJTJm": "/dynamics365fodataexchange/Export/A010/RFIA/RFIAZipFiles/"
+                                        }
+                                    },
+                                    "List_all_csv_files": {
+                                        "type": "ApiConnection",
+                                        "inputs": {
+                                            "host": {
+                                                "connection": {
+                                                    "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                }
+                                            },
+                                            "method": "get",
+                                            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('rfia_storage_account')))}/foldersV2/@{encodeURIComponent(encodeURIComponent(concat('/',parameters('sa_rfia_container'),'/',parameters('bs_export_rootfolder'),items('For_each_company'),parameters('bs_rfia_txtsubfolder'),item()?['Brand'])))}",
+                                            "queries": {
+                                                "nextPageMarker": "",
+                                                "useFlatListing": true
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "check_if_file_exists": [
+                                                "Succeeded",
+                                                "TimedOut",
+                                                "Skipped",
+                                                "Failed"
+                                            ]
+                                        },
+                                        "metadata": {
+                                            "JTJmZHluYW1pY3MzNjVmb2RhdGFleGNoYW5nZSUyZkV4cG9ydCUyZkEwMTAlMmZSRklBJTJmUkZJQVppcEZpbGVzJTJm": "/dynamics365fodataexchange/Export/A010/RFIA/RFIAZipFiles/",
+                                            "JTJmZHluYW1pY3MzNjVmb2RhdGFleGNoYW5nZSUyZkV4cG9ydCUyZkEwMTAlMmZSRklBJTJmUkZJQVR4dEZpbGVzJTJm": "/dynamics365fodataexchange/Export/A010/RFIA/RFIATxtFiles/"
+                                        }
+                                    },
+                                    "Compose_ftp_path": {
+                                        "type": "Compose",
+                                        "inputs": "@item()?['Path']"
+                                    },
+                                    "Compose_Brand": {
+                                        "type": "Compose",
+                                        "inputs": "@item()?['Brand']",
+                                        "runAfter": {
+                                            "Compose_ftp_path": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "check_if_file_exists": {
+                                        "type": "If",
+                                        "expression": {
+                                            "and": [
+                                                {
+                                                    "not": {
+                                                        "equals": [
+                                                            "@body('List_all_zip_files')?['status']",
+                                                            404
+                                                        ]
+                                                    }
+                                                }
+                                            ]
+                                        },
+                                        "actions": {
+                                            "For_each_zip_file": {
+                                                "type": "Foreach",
+                                                "foreach": "@body('List_all_zip_files')?['value']",
+                                                "actions": {
+                                                    "Delete_zip_files": {
+                                                        "type": "ApiConnection",
+                                                        "inputs": {
+                                                            "host": {
+                                                                "connection": {
+                                                                    "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                                }
+                                                            },
+                                                            "method": "delete",
+                                                            "headers": {
+                                                                "SkipDeleteIfFileNotFoundOnServer": false
+                                                            },
+                                                            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('rfia_storage_account')))}/files/@{encodeURIComponent(encodeURIComponent(item()?['Path']))}"
+                                                        },
+                                                        "runAfter": {
+                                                            "Check_file_status": [
+                                                                "Succeeded"
+                                                            ]
+                                                        }
+                                                    },
+                                                    "Extract_zip_file": {
+                                                        "type": "Function",
+                                                        "inputs": {
+                                                            "body": {
+                                                                "container": "@{parameters('sa_rfia_container')}",
+                                                                "blobName": "@{replace(item()?['Path'],'/dynamics365fodataexchange/','')}"
+                                                            },
+                                                            "function": {
+                                                                "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/sites/atf-a365-fa-middleware-cst/functions/ExtractZipFile"
+                                                            }
+                                                        }
+                                                    },
+                                                    "Check_file_status": {
+                                                        "type": "If",
+                                                        "expression": {
+                                                            "and": [
+                                                                {
+                                                                    "equals": [
+                                                                        "@outputs('Extract_zip_file')?['statusCode']",
+                                                                        200
+                                                                    ]
+                                                                }
+                                                            ]
+                                                        },
+                                                        "actions": {
+                                                            "Transform_to_Txt": {
+                                                                "type": "Function",
+                                                                "inputs": {
+                                                                    "body": {
+                                                                        "XmlContent": "@{body('Extract_zip_file')}",
+                                                                        "Container": "@{parameters('sa_rfia_container')}",
+                                                                        "TxtFileBlobName": "@{concat(parameters('bs_export_rootfolder'),items('For_each_company'),parameters('bs_rfia_txtsubfolder'),outputs('Compose_Brand'),'/','RFIA',formatDateTime(utcNow(),'yyyy-MM-dd'),guid(),'.csv')}",
+                                                                        "Brand": "@{outputs('Compose_Brand')}"
+                                                                    },
+                                                                    "function": {
+                                                                        "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/sites/atf-a365-fa-middleware-cst/functions/ATFRFIATransformationFunction"
+                                                                    }
+                                                                }
+                                                            }
+                                                        },
+                                                        "else": {
+                                                            "actions": {}
+                                                        },
+                                                        "runAfter": {
+                                                            "Extract_zip_file": [
+                                                                "Succeeded",
+                                                                "Failed"
+                                                            ]
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "else": {
+                                            "actions": {}
+                                        },
+                                        "runAfter": {
+                                            "List_all_zip_files": [
+                                                "Succeeded",
+                                                "Failed"
+                                            ]
+                                        }
+                                    },
+                                    "Check_if_CSV_exists": {
+                                        "type": "If",
+                                        "expression": {
+                                            "and": [
+                                                {
+                                                    "not": {
+                                                        "equals": [
+                                                            "@body('List_all_csv_files')?['status']",
+                                                            404
+                                                        ]
+                                                    }
+                                                }
+                                            ]
+                                        },
+                                        "actions": {
+                                            "For_each_csv_file": {
+                                                "type": "Foreach",
+                                                "foreach": "@body('List_all_csv_files')?['value']",
+                                                "actions": {
+                                                    "Get_blob_content_(V2)": {
+                                                        "type": "ApiConnection",
+                                                        "inputs": {
+                                                            "host": {
+                                                                "connection": {
+                                                                    "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                                }
+                                                            },
+                                                            "method": "get",
+                                                            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('rfia_storage_account')))}/files/@{encodeURIComponent(encodeURIComponent(item()?['Id']))}/content",
+                                                            "queries": {
+                                                                "inferContentType": true
+                                                            }
+                                                        }
+                                                    },
+                                                    "TxtFileSize": {
+                                                        "type": "Compose",
+                                                        "inputs": "@item()?['Size']",
+                                                        "runAfter": {
+                                                            "Get_blob_content_(V2)": [
+                                                                "Succeeded"
+                                                            ]
+                                                        }
+                                                    },
+                                                    "csvFileSize": {
+                                                        "type": "Compose",
+                                                        "inputs": "@body('Create_csv_file_in_ftp')?['Size']",
+                                                        "runAfter": {
+                                                            "Create_csv_file_in_ftp": [
+                                                                "Succeeded"
+                                                            ]
+                                                        }
+                                                    },
+                                                    "Condition": {
+                                                        "type": "If",
+                                                        "expression": {
+                                                            "and": [
+                                                                {
+                                                                    "equals": [
+                                                                        "@outputs('csvFileSize')",
+                                                                        "@outputs('TxtFileSize')"
+                                                                    ]
+                                                                }
+                                                            ]
+                                                        },
+                                                        "actions": {
+                                                            "Copy_file": {
+                                                                "type": "ApiConnection",
+                                                                "inputs": {
+                                                                    "host": {
+                                                                        "connection": {
+                                                                            "name": "@parameters('$connections')['ftp']['connectionId']"
+                                                                        }
+                                                                    },
+                                                                    "method": "post",
+                                                                    "headers": {
+                                                                        "ReadFileMetadataFromServer": true
+                                                                    },
+                                                                    "path": "/datasets/default/copyFile",
+                                                                    "queries": {
+                                                                        "source": "@body('Create_csv_file_in_ftp')?['Path']",
+                                                                        "destination": "@concat(outputs('Compose_ftp_path'),'/',item()?['Name'])",
+                                                                        "overwrite": false,
+                                                                        "queryParametersSingleEncoded": true
+                                                                    }
+                                                                }
+                                                            }
+                                                        },
+                                                        "else": {
+                                                            "actions": {
+                                                                "Until": {
+                                                                    "type": "Until",
+                                                                    "expression": "@equals(outputs('csvFileSize'), outputs('TxtFileSize'))",
+                                                                    "limit": {
+                                                                        "count": 60,
+                                                                        "timeout": "PT1H"
+                                                                    },
+                                                                    "actions": {
+                                                                        "Delay": {
+                                                                            "type": "Wait",
+                                                                            "inputs": {
+                                                                                "interval": {
+                                                                                    "count": 5,
+                                                                                    "unit": "Second"
+                                                                                }
+                                                                            }
+                                                                        },
+                                                                        "Copy_file_retry": {
+                                                                            "type": "ApiConnection",
+                                                                            "inputs": {
+                                                                                "host": {
+                                                                                    "connection": {
+                                                                                        "name": "@parameters('$connections')['ftp']['connectionId']"
+                                                                                    }
+                                                                                },
+                                                                                "method": "post",
+                                                                                "headers": {
+                                                                                    "ReadFileMetadataFromServer": true
+                                                                                },
+                                                                                "path": "/datasets/default/copyFile",
+                                                                                "queries": {
+                                                                                    "source": "@body('Create_csv_file_in_ftp')?['Path']",
+                                                                                    "destination": "@concat(parameters('ftp_rfia_folderpath'),'/',item()?['Name'])",
+                                                                                    "overwrite": false,
+                                                                                    "queryParametersSingleEncoded": true
+                                                                                }
+                                                                            },
+                                                                            "runAfter": {
+                                                                                "Delay": [
+                                                                                    "Succeeded"
+                                                                                ]
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        },
+                                                        "runAfter": {
+                                                            "csvFileSize": [
+                                                                "Succeeded"
+                                                            ]
+                                                        }
+                                                    },
+                                                    "Delete_tmp_ftp_file": {
+                                                        "type": "ApiConnection",
+                                                        "inputs": {
+                                                            "host": {
+                                                                "connection": {
+                                                                    "name": "@parameters('$connections')['ftp']['connectionId']"
+                                                                }
+                                                            },
+                                                            "method": "delete",
+                                                            "headers": {
+                                                                "SkipDeleteIfFileNotFoundOnServer": false
+                                                            },
+                                                            "path": "/datasets/default/files/@{encodeURIComponent(encodeURIComponent(body('Create_csv_file_in_ftp')?['Path']))}"
+                                                        },
+                                                        "runAfter": {
+                                                            "Condition": [
+                                                                "Succeeded"
+                                                            ]
+                                                        }
+                                                    },
+                                                    "Copy_csv_file_to_archive": {
+                                                        "type": "ApiConnection",
+                                                        "inputs": {
+                                                            "host": {
+                                                                "connection": {
+                                                                    "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                                }
+                                                            },
+                                                            "method": "post",
+                                                            "headers": {
+                                                                "ReadFileMetadataFromServer": true
+                                                            },
+                                                            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('rfia_storage_account')))}/copyFile",
+                                                            "queries": {
+                                                                "source": "@item()?['Path']",
+                                                                "destination": "@concat('/',parameters('sa_rfia_container'),'/',parameters('bs_export_rootfolder'),items('For_each_company'),parameters('bs_rfia_archivesubfolder'),outputs('Compose_Brand'),'/')",
+                                                                "overwrite": false,
+                                                                "queryParametersSingleEncoded": true
+                                                            }
+                                                        },
+                                                        "runAfter": {
+                                                            "Delete_tmp_ftp_file": [
+                                                                "Succeeded"
+                                                            ]
+                                                        }
+                                                    },
+                                                    "Delete_csv_from_TxtFiles": {
+                                                        "type": "ApiConnection",
+                                                        "inputs": {
+                                                            "host": {
+                                                                "connection": {
+                                                                    "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                                }
+                                                            },
+                                                            "method": "delete",
+                                                            "headers": {
+                                                                "SkipDeleteIfFileNotFoundOnServer": false
+                                                            },
+                                                            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('rfia_storage_account')))}/files/@{encodeURIComponent(encodeURIComponent(item()?['Path']))}"
+                                                        },
+                                                        "runAfter": {
+                                                            "Copy_csv_file_to_archive": [
+                                                                "Succeeded"
+                                                            ]
+                                                        }
+                                                    },
+                                                    "Create_csv_file_in_ftp": {
+                                                        "type": "ApiConnection",
+                                                        "inputs": {
+                                                            "host": {
+                                                                "connection": {
+                                                                    "name": "@parameters('$connections')['ftp']['connectionId']"
+                                                                }
+                                                            },
+                                                            "method": "post",
+                                                            "body": "@body('Get_blob_content_(V2)')",
+                                                            "headers": {
+                                                                "ReadFileMetadataFromServer": true
+                                                            },
+                                                            "path": "/datasets/default/files",
+                                                            "queries": {
+                                                                "folderPath": "@{outputs('Compose_ftp_path')}",
+                                                                "name": "@concat(item()?['Name'],'.tmp')",
+                                                                "queryParametersSingleEncoded": true
+                                                            }
+                                                        },
+                                                        "runAfter": {
+                                                            "TxtFileSize": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        "runtimeConfiguration": {
+                                                            "contentTransfer": {
+                                                                "transferMode": "Chunked"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "else": {
+                                            "actions": {}
+                                        },
+                                        "runAfter": {
+                                            "List_all_csv_files": [
+                                                "Succeeded",
+                                                "Failed"
+                                            ]
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "Parse_JSON": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "concurrency": {
+                                        "repetitions": 1
+                                    }
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "Get_client_secret": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "concurrency": {
+                                "repetitions": 1
+                            }
+                        }
+                    },
+                    "Get_clientid": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('d365fo-appid')}/value"
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs",
+                                    "outputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Get_client_secret": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('d365fo-appsecret')}/value"
+                        },
+                        "runAfter": {
+                            "Get_clientid": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs",
+                                    "outputs"
+                                ]
+                            }
+                        }
+                    }
+                },
+                "runAfter": {}
+            },
+            "Catch": {
+                "type": "Scope",
+                "actions": {
+                    "Get_secret": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('notification-distribution-list')}/value"
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs",
+                                    "outputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Compose_run_Id_URL": {
+                        "type": "Compose",
+                        "inputs": "@concat('https://portal.azure.com/#blade/Microsoft_Azure_EMA/LogicAppsMonitorBlade/runid/', encodeUriComponent(workflow().run.id))",
+                        "runAfter": {
+                            "Get_secret": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Filter_array": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@result('Try')",
+                            "where": "@or(equals(item()?['status'],'Failed'), equals(item()?['status'],'TimedOut'), equals(item()?['status'],'Skipped'))"
+                        },
+                        "runAfter": {
+                            "Compose_run_Id_URL": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Send_an_email_(V2)": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['office365']['connectionId']"
+                                }
+                            },
+                            "method": "post",
+                            "body": {
+                                "To": "@body('Get_secret')?['value']",
+                                "Subject": "Notifications - Logic App FAILED - @{workflow().name}",
+                                "Body": "<p class=\"editor-paragraph\">Logic App Run Failed<br><br>Run Id: @{outputs('Compose_run_Id_URL')}<br>When: @{utcNow()}<br><br>Failed actions:@{ body('Filter_array')?[0]?['error']?['message']}</p>",
+                                "Importance": "Normal"
+                            },
+                            "path": "/v2/Mail"
+                        },
+                        "runAfter": {
+                            "Filter_array": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Terminate": {
+                        "type": "Terminate",
+                        "inputs": {
+                            "runStatus": "Failed"
+                        },
+                        "runAfter": {
+                            "Send_an_email_(V2)": [
+                                "Succeeded"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Try": [
+                        "TimedOut",
+                        "Skipped",
+                        "Failed"
+                    ]
+                }
+            }
+        },
+        "outputs": {},
+        "parameters": {
+            "rfia_storage_account": {
+                "defaultValue": "atfa365sacst01",
+                "type": "String"
+            },
+            "sa_rfia_container": {
+                "defaultValue": "dynamics365fodataexchange",
+                "type": "String"
+            },
+            "company_list": {
+                "defaultValue": [
+                    "A010"
+                ],
+                "type": "Array"
+            },
+            "bs_rfia_zipsubfolder": {
+                "defaultValue": "/RFIA/RFIAZipFiles/",
+                "type": "String"
+            },
+            "bs_export_rootfolder": {
+                "defaultValue": "Export/",
+                "type": "String"
+            },
+            "bs_rfia_txtsubfolder": {
+                "defaultValue": "/RFIA/RFIATxtFiles/",
+                "type": "String"
+            },
+            "ftp_rfia_folderpath": {
+                "defaultValue": "/FIA/KGM",
+                "type": "String"
+            },
+            "bs_rfia_archivesubfolder": {
+                "defaultValue": "/RFIA/RFIArchivedFiles/",
+                "type": "String"
+            },
+            "tenant": {
+                "defaultValue": "6cfb5c6a-c8a6-4e24-a04c-a65e7a7e5d7d",
+                "type": "String"
+            },
+            "D365FOUrl": {
+                "defaultValue": "https://atf-a365-cst.sandbox.operations.eu.dynamics.com",
+                "type": "String"
+            },
+            "recurrence_interval": {
+                "defaultValue": "10",
+                "type": "String"
+            },
+            "recurrence_frequency": {
+                "defaultValue": "Minute",
+                "type": "String"
+            },
+            "recurrence_startTime": {
+                "defaultValue": "2025-11-11T08:00:00Z",
+                "type": "String"
+            },
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "azureblob": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/azureblob",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/azureblob-2",
+                    "connectionName": "azureblob",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "ftp": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/ftp",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/ftp",
+                    "connectionName": "ftp",
+                    "connectionProperties": {}
+                },
+                "keyvault": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/keyvault",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/keyvault-1",
+                    "connectionName": "keyvault",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "office365": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/office365",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/office365-2",
+                    "connectionName": "office365",
+                    "connectionProperties": {}
+                }
+            }
+        }
+    }
+}
