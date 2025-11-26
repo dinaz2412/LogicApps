@@ -1,0 +1,817 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "Recurrence": {
+                "type": "Recurrence",
+                "recurrence": {
+                    "interval": "@parameters('recurrence_interval')",
+                    "frequency": "@{parameters('recurrence_frequency')}",
+                    "startTime": "@{parameters('recurrence_startTime')}",
+                    "timeZone": "W. Europe Standard Time"
+                }
+            }
+        },
+        "actions": {
+            "Try": {
+                "type": "Scope",
+                "actions": {
+                    "Get_client_id": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('d365fo-appid')}/value"
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs",
+                                    "outputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Get_client_secret": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('d365fo-appsecret')}/value"
+                        },
+                        "runAfter": {
+                            "Get_client_id": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs",
+                                    "outputs"
+                                ]
+                            }
+                        }
+                    },
+                    "For_each_company": {
+                        "type": "Foreach",
+                        "foreach": "@parameters('company_list')",
+                        "actions": {
+                            "Get_3PL_Integration_Parameter": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@concat(\r\n  parameters('D365FOUrl'),\r\n  '/data/ATFThreePLIntegrationParameters?cross-company=true&$filter=dataAreaId eq ''',\r\n  items('For_each_company'),\r\n  ''''\r\n)",
+                                    "method": "GET",
+                                    "authentication": {
+                                        "type": "ActiveDirectoryOAuth",
+                                        "authority": "https://login.windows.net/",
+                                        "tenant": "@{parameters('Tenant')}",
+                                        "audience": "@{parameters('D365FOUrl')}",
+                                        "clientId": "@{body('Get_client_id')?['value']}",
+                                        "secret": "@{body('Get_client_secret')?['value']}"
+                                    }
+                                },
+                                "runtimeConfiguration": {
+                                    "contentTransfer": {
+                                        "transferMode": "Chunked"
+                                    }
+                                }
+                            },
+                            "Parse_JSON": {
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('Get_3PL_Integration_Parameter')",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "@@odata.context": {
+                                                "type": "string"
+                                            },
+                                            "value": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "@@odata.etag": {
+                                                            "type": "string"
+                                                        },
+                                                        "dataAreaId": {
+                                                            "type": "string"
+                                                        },
+                                                        "ThreePLOperator": {
+                                                            "type": "string"
+                                                        },
+                                                        "Description": {
+                                                            "type": "string"
+                                                        },
+                                                        "AzurePathPickingList": {
+                                                            "type": "string"
+                                                        },
+                                                        "ProviderpathItemArrival": {
+                                                            "type": "string"
+                                                        },
+                                                        "DefinitionGroupName": {
+                                                            "type": "string"
+                                                        },
+                                                        "DMFExportProjectItemMaster": {
+                                                            "type": "string"
+                                                        },
+                                                        "AzurepathItemMaster": {
+                                                            "type": "string"
+                                                        },
+                                                        "ProviderPathImportPO": {
+                                                            "type": "string"
+                                                        },
+                                                        "ProviderpathItemMaster": {
+                                                            "type": "string"
+                                                        },
+                                                        "DMFExportProjectItemArrival": {
+                                                            "type": "string"
+                                                        },
+                                                        "ImportProjectPO": {
+                                                            "type": "string"
+                                                        },
+                                                        "AzurepathItemArrival": {
+                                                            "type": "string"
+                                                        },
+                                                        "DMFExportProjectPickingList": {
+                                                            "type": "string"
+                                                        },
+                                                        "AzurePath": {
+                                                            "type": "string"
+                                                        },
+                                                        "ProviderPathPickingList": {
+                                                            "type": "string"
+                                                        },
+                                                        "AzurePathImportPO": {
+                                                            "type": "string"
+                                                        },
+                                                        "ProviderPath": {
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "@@odata.etag",
+                                                        "dataAreaId",
+                                                        "ThreePLOperator",
+                                                        "Description",
+                                                        "AzurePathPickingList",
+                                                        "ProviderpathItemArrival",
+                                                        "DefinitionGroupName",
+                                                        "DMFExportProjectItemMaster",
+                                                        "AzurepathItemMaster",
+                                                        "ProviderPathImportPO",
+                                                        "ProviderpathItemMaster",
+                                                        "DMFExportProjectItemArrival",
+                                                        "ImportProjectPO",
+                                                        "AzurepathItemArrival",
+                                                        "DMFExportProjectPickingList",
+                                                        "AzurePath",
+                                                        "ProviderPathPickingList",
+                                                        "AzurePathImportPO",
+                                                        "ProviderPath"
+                                                    ]
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "Get_3PL_Integration_Parameter": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            },
+                            "For_each_3PL_parameter": {
+                                "type": "Foreach",
+                                "foreach": "@body('Parse_JSON')?['value']",
+                                "actions": {
+                                    "Check_3PL_Parameters": {
+                                        "type": "If",
+                                        "expression": {
+                                            "and": [
+                                                {
+                                                    "not": {
+                                                        "equals": [
+                                                            "@item()?['DefinitionGroupName']",
+                                                            ""
+                                                        ]
+                                                    }
+                                                },
+                                                {
+                                                    "not": {
+                                                        "equals": [
+                                                            "@item()?['ProviderPath']",
+                                                            ""
+                                                        ]
+                                                    }
+                                                },
+                                                {
+                                                    "not": {
+                                                        "equals": [
+                                                            "@item()?['AzurePath']",
+                                                            ""
+                                                        ]
+                                                    }
+                                                }
+                                            ]
+                                        },
+                                        "actions": {
+                                            "List_files_in_SFTP": {
+                                                "type": "ApiConnection",
+                                                "inputs": {
+                                                    "host": {
+                                                        "connection": {
+                                                            "name": "@parameters('$connections')['ftp-1']['connectionId']"
+                                                        }
+                                                    },
+                                                    "method": "get",
+                                                    "path": "/datasets/default/folders/@{encodeURIComponent(encodeURIComponent(outputs('Compose_provider_path')))}"
+                                                },
+                                                "runAfter": {
+                                                    "Compose_3PL_Operator": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "metadata": {
+                                                    "L091dGJvdW5k": "/Outbound",
+                                                    "L1RFU1QvT3V0Ym91bmQ=": "/TEST/Outbound"
+                                                }
+                                            },
+                                            "Compose_azure_path": {
+                                                "type": "Compose",
+                                                "inputs": "@item()?['AzurePath']",
+                                                "runAfter": {
+                                                    "Compose_definition_group_name": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "Compose_provider_path": {
+                                                "type": "Compose",
+                                                "inputs": "@item()?['ProviderPath']",
+                                                "runAfter": {
+                                                    "Compose_azure_path": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "Compose_3PL_Operator": {
+                                                "type": "Compose",
+                                                "inputs": "@item()?['ThreePLOperator']",
+                                                "runAfter": {
+                                                    "Compose_provider_path": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            },
+                                            "Compose_definition_group_name": {
+                                                "type": "Compose",
+                                                "inputs": "@item()?['DefinitionGroupName']"
+                                            },
+                                            "Condition_1": {
+                                                "type": "If",
+                                                "expression": {
+                                                    "and": [
+                                                        {
+                                                            "not": {
+                                                                "equals": [
+                                                                    "@length(body('List_files_in_SFTP'))",
+                                                                    0
+                                                                ]
+                                                            }
+                                                        }
+                                                    ]
+                                                },
+                                                "actions": {
+                                                    "For_each_sftp_file": {
+                                                        "type": "Foreach",
+                                                        "foreach": "@body('List_files_in_SFTP')",
+                                                        "actions": {
+                                                            "Condition": {
+                                                                "type": "If",
+                                                                "expression": {
+                                                                    "and": [
+                                                                        {
+                                                                            "startsWith": [
+                                                                                "@item()?['Name']",
+                                                                                "FROM_WMS_DDT_OUTBOUND"
+                                                                            ]
+                                                                        }
+                                                                    ]
+                                                                },
+                                                                "actions": {
+                                                                    "Create_blob_(V2)": {
+                                                                        "type": "ApiConnection",
+                                                                        "inputs": {
+                                                                            "host": {
+                                                                                "connection": {
+                                                                                    "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                                                }
+                                                                            },
+                                                                            "method": "post",
+                                                                            "body": "@body('Get_file_content')",
+                                                                            "headers": {
+                                                                                "ReadFileMetadataFromServer": true
+                                                                            },
+                                                                            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('3pl_storage_account')))}/files",
+                                                                            "queries": {
+                                                                                "folderPath": "@concat('/',parameters('sa_3pl_container'),'/',parameters('3pl_import_rootfolder'),items('For_each_company'),outputs('Compose_azure_path'),parameters('3plimport_csv_filepath'))",
+                                                                                "name": "@item()?['Name']",
+                                                                                "queryParametersSingleEncoded": true
+                                                                            }
+                                                                        },
+                                                                        "runAfter": {
+                                                                            "Get_file_content": [
+                                                                                "Succeeded"
+                                                                            ]
+                                                                        },
+                                                                        "runtimeConfiguration": {
+                                                                            "contentTransfer": {
+                                                                                "transferMode": "Chunked"
+                                                                            }
+                                                                        }
+                                                                    },
+                                                                    "Get_file_content": {
+                                                                        "type": "ApiConnection",
+                                                                        "inputs": {
+                                                                            "host": {
+                                                                                "connection": {
+                                                                                    "name": "@parameters('$connections')['ftp-1']['connectionId']"
+                                                                                }
+                                                                            },
+                                                                            "method": "get",
+                                                                            "path": "/datasets/default/files/@{encodeURIComponent(encodeURIComponent(item()?['Id']))}/content",
+                                                                            "queries": {
+                                                                                "inferContentType": true
+                                                                            }
+                                                                        }
+                                                                    },
+                                                                    "Get_blob_content_(V2)_1": {
+                                                                        "type": "ApiConnection",
+                                                                        "inputs": {
+                                                                            "host": {
+                                                                                "connection": {
+                                                                                    "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                                                }
+                                                                            },
+                                                                            "method": "get",
+                                                                            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('3pl_storage_account')))}/files/@{encodeURIComponent(encodeURIComponent(body('Create_blob_(V2)')?['Id']))}/content",
+                                                                            "queries": {
+                                                                                "inferContentType": true
+                                                                            }
+                                                                        },
+                                                                        "runAfter": {
+                                                                            "Create_blob_(V2)": [
+                                                                                "Succeeded"
+                                                                            ]
+                                                                        }
+                                                                    },
+                                                                    "ATF3PLImportPackingSlipTransformation": {
+                                                                        "type": "Function",
+                                                                        "inputs": {
+                                                                            "body": {
+                                                                                "FilePath": "@{replace(body('Create_blob_(V2)')?['Path'],'/dynamics365fodataexchange/','')}",
+                                                                                "EntityName": "@{parameters('3pl_entity_name')}",
+                                                                                "OutputContainer": "@{parameters('sa_3pl_container')}",
+                                                                                "OutputPath": "@{concat(parameters('3pl_import_rootfolder'),items('For_each_company'),outputs('Compose_azure_path'),parameters('3plimport_dataxml_filepath'))\r\n}",
+                                                                                "ThreePLOperator": "@{outputs('Compose_3PL_Operator')}"
+                                                                            },
+                                                                            "function": {
+                                                                                "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/sites/atf-a365-fa-middleware-cst/functions/ATF3PLImportPackingSlipTransformation"
+                                                                            }
+                                                                        },
+                                                                        "runAfter": {
+                                                                            "Get_blob_content_(V2)_1": [
+                                                                                "Succeeded"
+                                                                            ]
+                                                                        }
+                                                                    },
+                                                                    "Check_status": {
+                                                                        "type": "If",
+                                                                        "expression": {
+                                                                            "and": [
+                                                                                {
+                                                                                    "equals": [
+                                                                                        "@outputs('ATF3PLImportPackingSlipTransformation')?['statusCode']",
+                                                                                        200
+                                                                                    ]
+                                                                                }
+                                                                            ]
+                                                                        },
+                                                                        "actions": {
+                                                                            "Send_message": {
+                                                                                "type": "ApiConnection",
+                                                                                "inputs": {
+                                                                                    "host": {
+                                                                                        "connection": {
+                                                                                            "name": "@parameters('$connections')['servicebus']['connectionId']"
+                                                                                        }
+                                                                                    },
+                                                                                    "method": "post",
+                                                                                    "body": {
+                                                                                        "SessionId": "\n",
+                                                                                        "MessageId": "@guid()",
+                                                                                        "ContentData": "@base64(concat('{','\n','  \"DataFilePath\": \"',body('ATF3PLImportPackingSlipTransformation')?['BlobName'],'\",','\n','  \"ManifestFilePath\": \"',concat(parameters('3pl_import_rootfolder'),items('For_each_company'),outputs('Compose_azure_path'),parameters('3plimport_template_filePath'),'Manifest.xml'),'\",','\n','  \"HeaderFilePath\": \"',concat(parameters('3pl_import_rootfolder'),items('For_each_company'),outputs('Compose_azure_path'),parameters('3plimport_template_filePath'),'PackageHeader.xml'),'\",','\n','  \"EntityName\": \"',parameters('3pl_entity_name'),'\",','\n','  \"Timestamp\": \"',utcNow(),'\",','\n','  \"Company\": \"',items('For_each_company'),'\",','\n','  \"ThreePLOperator\": \"',outputs('Compose_3PL_Operator'),'\",','\n','  \"ZipFilePath\": \"',concat(parameters('3pl_import_rootfolder'),items('For_each_company'),outputs('Compose_azure_path'),parameters('3plimport_zip_filepath')),'\",','\n','  \"DmfProjectName\": \"',outputs('Compose_definition_group_name'),'\"','\n','}'))",
+                                                                                        "ContentType": "application/json"
+                                                                                    },
+                                                                                    "path": "/@{encodeURIComponent(encodeURIComponent('import-to-dynamics'))}/messages",
+                                                                                    "queries": {
+                                                                                        "systemProperties": "Run Details"
+                                                                                    }
+                                                                                }
+                                                                            },
+                                                                            "Delete_blob_(V2)": {
+                                                                                "type": "ApiConnection",
+                                                                                "inputs": {
+                                                                                    "host": {
+                                                                                        "connection": {
+                                                                                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                                                        }
+                                                                                    },
+                                                                                    "method": "delete",
+                                                                                    "headers": {
+                                                                                        "SkipDeleteIfFileNotFoundOnServer": false
+                                                                                    },
+                                                                                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('3pl_storage_account')))}/files/@{encodeURIComponent(encodeURIComponent(body('Create_blob_(V2)')?['Path']))}"
+                                                                                },
+                                                                                "runAfter": {
+                                                                                    "Copy_blob_to_archive": [
+                                                                                        "Succeeded"
+                                                                                    ]
+                                                                                }
+                                                                            },
+                                                                            "Copy_blob_to_archive": {
+                                                                                "type": "ApiConnection",
+                                                                                "inputs": {
+                                                                                    "host": {
+                                                                                        "connection": {
+                                                                                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                                                        }
+                                                                                    },
+                                                                                    "method": "post",
+                                                                                    "headers": {
+                                                                                        "ReadFileMetadataFromServer": true
+                                                                                    },
+                                                                                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('3pl_storage_account')))}/copyFile",
+                                                                                    "queries": {
+                                                                                        "source": "@body('Create_blob_(V2)')?['Path']",
+                                                                                        "destination": "@concat('/',parameters('sa_3pl_container'),'/',parameters('3pl_import_rootfolder'),items('For_each_company'),outputs('Compose_azure_path'),parameters('3plimort_archive_filepath'))",
+                                                                                        "overwrite": true,
+                                                                                        "queryParametersSingleEncoded": true
+                                                                                    }
+                                                                                },
+                                                                                "runAfter": {
+                                                                                    "Send_message": [
+                                                                                        "Succeeded"
+                                                                                    ]
+                                                                                }
+                                                                            }
+                                                                        },
+                                                                        "else": {
+                                                                            "actions": {}
+                                                                        },
+                                                                        "runAfter": {
+                                                                            "Set_variable": [
+                                                                                "Succeeded"
+                                                                            ]
+                                                                        }
+                                                                    },
+                                                                    "Set_variable": {
+                                                                        "type": "SetVariable",
+                                                                        "inputs": {
+                                                                            "name": "SFTPCount",
+                                                                            "value": "@outputs('Compose')"
+                                                                        },
+                                                                        "runAfter": {
+                                                                            "Compose": [
+                                                                                "Succeeded"
+                                                                            ]
+                                                                        }
+                                                                    },
+                                                                    "Compose": {
+                                                                        "type": "Compose",
+                                                                        "inputs": "@add(variables('SFTPCount'), 1)",
+                                                                        "runAfter": {
+                                                                            "ATF3PLImportPackingSlipTransformation": [
+                                                                                "Succeeded"
+                                                                            ]
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "else": {
+                                                                    "actions": {}
+                                                                }
+                                                            }
+                                                        },
+                                                        "runtimeConfiguration": {
+                                                            "concurrency": {
+                                                                "repetitions": 1
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "else": {
+                                                    "actions": {}
+                                                },
+                                                "runAfter": {
+                                                    "List_files_in_SFTP": [
+                                                        "Succeeded"
+                                                    ]
+                                                }
+                                            }
+                                        },
+                                        "else": {
+                                            "actions": {}
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "Parse_JSON": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "concurrency": {
+                                        "repetitions": 1
+                                    }
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "Get_client_secret": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "concurrency": {
+                                "repetitions": 1
+                            }
+                        }
+                    },
+                    "check_SFTP_count": {
+                        "type": "If",
+                        "expression": {
+                            "and": [
+                                {
+                                    "equals": [
+                                        "@variables('SFTPCount')",
+                                        0
+                                    ]
+                                }
+                            ]
+                        },
+                        "actions": {
+                            "Terminate_1": {
+                                "type": "Terminate",
+                                "inputs": {
+                                    "runStatus": "Cancelled"
+                                }
+                            }
+                        },
+                        "else": {
+                            "actions": {}
+                        },
+                        "runAfter": {
+                            "For_each_company": [
+                                "Succeeded"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Initialize_variables": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Catch": {
+                "type": "Scope",
+                "actions": {
+                    "Get_notification_list": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('notification-distribution-list')}/value"
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs",
+                                    "outputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Compose_run_Id_URL": {
+                        "type": "Compose",
+                        "inputs": "@concat('https://portal.azure.com/#blade/Microsoft_Azure_EMA/LogicAppsMonitorBlade/runid/', encodeUriComponent(workflow().run.id))",
+                        "runAfter": {
+                            "Get_notification_list": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Filter_array": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@result('Try')",
+                            "where": "@or(equals(item()?['status'],'Failed'), equals(item()?['status'],'TimedOut'), equals(item()?['status'],'Skipped'))"
+                        },
+                        "runAfter": {
+                            "Compose_run_Id_URL": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Send_an_email_(V2)_": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['office365']['connectionId']"
+                                }
+                            },
+                            "method": "post",
+                            "body": {
+                                "To": "dinaz.rohinton.patel@avanade.com",
+                                "Subject": "Notifications - Logic App FAILED - @{workflow().name}",
+                                "Body": "<p class=\"editor-paragraph\">Logic App Run Failed<br><br>Run Id: @{outputs('Compose_run_Id_URL')}<br>When: @{utcNow()}<br><br>Failed actions:@{ body('Filter_array')?[0]?['error']?['message']}</p>",
+                                "Importance": "Normal"
+                            },
+                            "path": "/v2/Mail"
+                        },
+                        "runAfter": {
+                            "Filter_array": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Terminate": {
+                        "type": "Terminate",
+                        "inputs": {
+                            "runStatus": "Failed"
+                        },
+                        "runAfter": {
+                            "Send_an_email_(V2)_": [
+                                "Succeeded"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Try": [
+                        "TimedOut",
+                        "Skipped",
+                        "Failed"
+                    ]
+                }
+            },
+            "Initialize_variables": {
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "SFTPCount",
+                            "type": "integer",
+                            "value": 0
+                        }
+                    ]
+                },
+                "runAfter": {}
+            }
+        },
+        "outputs": {},
+        "parameters": {
+            "3pl_storage_account": {
+                "defaultValue": "atfa365sacst01",
+                "type": "String"
+            },
+            "sa_3pl_container": {
+                "defaultValue": "dynamics365fodataexchange",
+                "type": "String"
+            },
+            "company_list": {
+                "defaultValue": [
+                    "A010"
+                ],
+                "type": "Array"
+            },
+            "D365FOUrl": {
+                "defaultValue": "https://atf-a365-cst.sandbox.operations.eu.dynamics.com",
+                "type": "String"
+            },
+            "Tenant": {
+                "defaultValue": "6cfb5c6a-c8a6-4e24-a04c-a65e7a7e5d7d",
+                "type": "String"
+            },
+            "3plimport_csv_filepath": {
+                "defaultValue": "3PLCSVFilesToProcess/",
+                "type": "String"
+            },
+            "3plimport_template_filePath": {
+                "defaultValue": "3PLTemplates/",
+                "type": "String"
+            },
+            "3pl_import_rootfolder": {
+                "defaultValue": "Import/",
+                "type": "String"
+            },
+            "3pl_entity_name": {
+                "defaultValue": "Packing slip journal",
+                "type": "String"
+            },
+            "3plimport_dataxml_filepath": {
+                "defaultValue": "3PLXMLDataFiles/",
+                "type": "String"
+            },
+            "3plimport_zip_filepath": {
+                "defaultValue": "3PLZipFiles/",
+                "type": "String"
+            },
+            "3plimort_archive_filepath": {
+                "defaultValue": "3PLArchivedFiles/",
+                "type": "String"
+            },
+            "recurrence_interval": {
+                "defaultValue": "10",
+                "type": "String"
+            },
+            "recurrence_frequency": {
+                "defaultValue": "Minute",
+                "type": "String"
+            },
+            "recurrence_startTime": {
+                "defaultValue": "2025-11-11T08:00:00Z",
+                "type": "String"
+            },
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "keyvault": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/keyvault",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/keyvault-1",
+                    "connectionName": "keyvault",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "ftp-1": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/ftp",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/ftp-1",
+                    "connectionName": "ftp-1",
+                    "connectionProperties": {}
+                },
+                "azureblob": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/azureblob",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/azureblob-2",
+                    "connectionName": "azureblob",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "servicebus": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/servicebus",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/servicebus",
+                    "connectionName": "servicebus",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "office365": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/office365",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/office365-2",
+                    "connectionName": "office365",
+                    "connectionProperties": {}
+                }
+            }
+        }
+    }
+}
