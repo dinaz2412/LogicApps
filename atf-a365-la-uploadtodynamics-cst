@@ -1,0 +1,858 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "When_a_message_is_received_in_a_queue_(peek-lock)": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['servicebus']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/@{encodeURIComponent(encodeURIComponent('import-to-dynamics'))}/messages/head/peek",
+                    "queries": {
+                        "queueType": "Main",
+                        "sessionId": "None"
+                    }
+                },
+                "recurrence": {
+                    "interval": 2,
+                    "frequency": "Minute",
+                    "timeZone": "W. Europe Standard Time"
+                },
+                "runtimeConfiguration": {
+                    "concurrency": {
+                        "runs": 1
+                    }
+                }
+            }
+        },
+        "actions": {
+            "Try": {
+                "type": "Scope",
+                "actions": {
+                    "Parse_JSON_1": {
+                        "type": "ParseJson",
+                        "inputs": {
+                            "content": "@outputs('Compose_message_content')",
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "DataFilePath": {
+                                        "type": "string"
+                                    },
+                                    "ManifestFilePath": {
+                                        "type": "string"
+                                    },
+                                    "HeaderFilePath": {
+                                        "type": "string"
+                                    },
+                                    "EntityName": {
+                                        "type": "string"
+                                    },
+                                    "Timestamp": {
+                                        "type": "string"
+                                    },
+                                    "Company": {
+                                        "type": "string"
+                                    },
+                                    "ThreePLOperator": {
+                                        "type": "string"
+                                    },
+                                    "ZipFilePath": {
+                                        "type": "string"
+                                    },
+                                    "DmfProjectName": {
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "DataFilePath",
+                                    "ManifestFilePath",
+                                    "HeaderFilePath",
+                                    "EntityName",
+                                    "Timestamp",
+                                    "Company",
+                                    "ThreePLOperator",
+                                    "ZipFilePath",
+                                    "DmfProjectName"
+                                ]
+                            }
+                        },
+                        "runAfter": {
+                            "Compose_message_content": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Set_variable_execution_status": {
+                        "type": "SetVariable",
+                        "inputs": {
+                            "name": "Execution status",
+                            "value": "NotRun"
+                        },
+                        "runAfter": {
+                            "Parse_JSON_1": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Set_variable_importCompleted": {
+                        "type": "SetVariable",
+                        "inputs": {
+                            "name": "importCompleted",
+                            "value": false
+                        },
+                        "runAfter": {
+                            "Set_variable_execution_status": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Compose_lockToken": {
+                        "type": "Compose",
+                        "inputs": "@triggerBody()?['LockToken']",
+                        "runAfter": {
+                            "Set_variable_importCompleted": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Compose_message_content": {
+                        "type": "Compose",
+                        "inputs": "@base64ToString(triggerBody()?['ContentData'])\r\n"
+                    },
+                    "CreateZipFromBlobPaths": {
+                        "type": "Function",
+                        "inputs": {
+                            "body": {
+                                "zipFileName": "@{concat(body('Parse_JSON_1')['ZipFilePath'],'PackingSlipJournalPackage_',guid(),'.zip')}",
+                                "entityName": "Packing slip journal",
+                                "sourceContainer": "@{parameters('sa_3pl_container')}",
+                                "targetContainer": "@{parameters('sa_3pl_container')}",
+                                "files": [
+                                    "@{body('Parse_JSON_1')['ManifestFilePath']}",
+                                    "@{body('Parse_JSON_1')['HeaderFilePath']}",
+                                    "@{body('Parse_JSON_1')['DataFilePath']}"
+                                ]
+                            },
+                            "function": {
+                                "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/sites/atf-a365-fa-middleware-cst/functions/CreateZipFromBlobPaths"
+                            }
+                        },
+                        "runAfter": {
+                            "Compose_lockToken": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Check_if_zip_file_is_created": {
+                        "type": "If",
+                        "expression": {
+                            "and": [
+                                {
+                                    "equals": [
+                                        "@outputs('CreateZipFromBlobPaths')?['StatusCode']",
+                                        200
+                                    ]
+                                }
+                            ]
+                        },
+                        "actions": {
+                            "Get_zip_blob_content_(V2)": {
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                        }
+                                    },
+                                    "method": "get",
+                                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('storage_account')))}/files/@{encodeURIComponent(encodeURIComponent(outputs('CreateZipFromBlobPaths')?['body']?['ZipFilePath']))}/content",
+                                    "queries": {
+                                        "inferContentType": true
+                                    }
+                                },
+                                "runAfter": {
+                                    "Delete_csv_File": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            },
+                            "Get_client_id": {
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                        }
+                                    },
+                                    "method": "get",
+                                    "path": "/secrets/@{encodeURIComponent('d365fo-appid')}/value"
+                                },
+                                "runAfter": {
+                                    "Get_zip_blob_content_(V2)": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "secureData": {
+                                        "properties": [
+                                            "inputs",
+                                            "outputs"
+                                        ]
+                                    }
+                                }
+                            },
+                            "Get_client_secret": {
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                        }
+                                    },
+                                    "method": "get",
+                                    "path": "/secrets/@{encodeURIComponent('d365fo-appsecret')}/value"
+                                },
+                                "runAfter": {
+                                    "Get_client_id": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "secureData": {
+                                        "properties": [
+                                            "inputs",
+                                            "outputs"
+                                        ]
+                                    }
+                                }
+                            },
+                            "AzureWritableURL": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@concat(parameters('D365FOURL'),'/data/DataManagementDefinitionGroups/Microsoft.Dynamics.DataEntities.GetAzureWriteUrl')",
+                                    "method": "POST",
+                                    "body": {
+                                        "uniqueFileName": "ATF3PLShippingDetailsImport"
+                                    },
+                                    "authentication": {
+                                        "type": "ActiveDirectoryOAuth",
+                                        "authority": "https://login.windows.net/",
+                                        "tenant": "@{parameters('Tenant')}",
+                                        "audience": "@{parameters('D365FOURL')}",
+                                        "clientId": "@{body('Get_client_id')?['value']}",
+                                        "secret": "@{body('Get_client_secret')?['value']}"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Get_client_secret": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "contentTransfer": {
+                                        "transferMode": "Chunked"
+                                    }
+                                }
+                            },
+                            "Parse_JSON": {
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('AzureWritableURL')",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "@@odata.context": {
+                                                "type": "string"
+                                            },
+                                            "value": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "AzureWritableURL": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            },
+                            "Compose": {
+                                "type": "Compose",
+                                "inputs": "@body('Parse_JSON')?['value']",
+                                "runAfter": {
+                                    "Parse_JSON": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            },
+                            "Parse_JSON_BlobURL": {
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@outputs('Compose')",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "BlobId": {
+                                                "type": "string"
+                                            },
+                                            "BlobUrl": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "Compose": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            },
+                            "Compose_blob_URL": {
+                                "type": "Compose",
+                                "inputs": "@body('Parse_JSON_BlobURL')?['BlobUrl']",
+                                "runAfter": {
+                                    "Parse_JSON_BlobURL": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            },
+                            "Upload_to_Blob": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@{outputs('Compose_blob_URL')}",
+                                    "method": "PUT",
+                                    "headers": {
+                                        "x-ms-blob-type": "BlockBlob"
+                                    },
+                                    "body": "@body('Get_zip_blob_content_(V2)')"
+                                },
+                                "runAfter": {
+                                    "Compose_blob_URL": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            },
+                            "ImportFromPackage": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@concat(parameters('D365FOURL'),'/data/DataManagementDefinitionGroups/Microsoft.Dynamics.DataEntities.ImportFromPackage')",
+                                    "method": "POST",
+                                    "body": {
+                                        "packageUrl": "@{outputs('Compose_blob_URL')}",
+                                        "definitionGroupId": "@{body('Parse_JSON_1')['DmfProjectName']}",
+                                        "executionId": "@{concat('PackSlipImp-',workflow().run.name)}",
+                                        "execute": true,
+                                        "overwrite": true,
+                                        "legalEntityId": "@{body('Parse_JSON_1')['Company']}"
+                                    },
+                                    "authentication": {
+                                        "type": "ActiveDirectoryOAuth",
+                                        "authority": "https://login.windows.net/",
+                                        "tenant": "@{parameters('Tenant')}",
+                                        "audience": "@{parameters('D365FOURL')}",
+                                        "clientId": "@{body('Get_client_id')?['value']}",
+                                        "secret": "@{body('Get_client_secret')?['value']}"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Upload_to_Blob": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "contentTransfer": {
+                                        "transferMode": "Chunked"
+                                    }
+                                }
+                            },
+                            "Complete_the_message_in_a_queue": {
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['servicebus']['connectionId']"
+                                        }
+                                    },
+                                    "method": "delete",
+                                    "path": "/@{encodeURIComponent(encodeURIComponent('import-to-dynamics'))}/messages/complete",
+                                    "queries": {
+                                        "lockToken": "@{outputs('Compose_lockToken')}",
+                                        "queueType": "Main",
+                                        "sessionId": ""
+                                    }
+                                },
+                                "runAfter": {
+                                    "ImportFromPackage": [
+                                        "Succeeded",
+                                        "TimedOut",
+                                        "Skipped",
+                                        "Failed"
+                                    ]
+                                }
+                            },
+                            "Until": {
+                                "type": "Until",
+                                "expression": "@equals(variables('importCompleted'), true)",
+                                "limit": {
+                                    "count": 30,
+                                    "timeout": "PT5M"
+                                },
+                                "actions": {
+                                    "Get_Execution_summary": {
+                                        "type": "Http",
+                                        "inputs": {
+                                            "uri": "@concat(parameters('D365FOUrl'),'/data/DataManagementDefinitionGroups/Microsoft.Dynamics.DataEntities.GetExecutionSummaryStatus')",
+                                            "method": "POST",
+                                            "body": {
+                                                "executionId": "@{body('ImportFromPackage')?['value']}"
+                                            },
+                                            "authentication": {
+                                                "type": "ActiveDirectoryOAuth",
+                                                "authority": "https://login.windows.net/",
+                                                "tenant": "@{parameters('Tenant')}",
+                                                "audience": "@{parameters('D365FOURL')}",
+                                                "clientId": "@{body('Get_client_id')?['value']}",
+                                                "secret": "@{body('Get_client_secret')?['value']}"
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "Delay": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "runtimeConfiguration": {
+                                            "contentTransfer": {
+                                                "transferMode": "Chunked"
+                                            }
+                                        }
+                                    },
+                                    "Set_variable": {
+                                        "type": "SetVariable",
+                                        "inputs": {
+                                            "name": "Execution status",
+                                            "value": "@body('Get_Execution_summary')?['value']"
+                                        },
+                                        "runAfter": {
+                                            "Get_Execution_summary": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "Delay": {
+                                        "type": "Wait",
+                                        "inputs": {
+                                            "interval": {
+                                                "count": 10,
+                                                "unit": "Second"
+                                            }
+                                        }
+                                    },
+                                    "Condition_on_Execution_Status": {
+                                        "type": "If",
+                                        "expression": {
+                                            "or": [
+                                                {
+                                                    "equals": [
+                                                        "@variables('Execution status')",
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                {
+                                                    "equals": [
+                                                        "@variables('Execution status')",
+                                                        "Failed"
+                                                    ]
+                                                },
+                                                {
+                                                    "equals": [
+                                                        "@variables('Execution status')",
+                                                        "PartiallySucceeded"
+                                                    ]
+                                                },
+                                                {
+                                                    "equals": [
+                                                        "@variables('Execution status')",
+                                                        "Canceled"
+                                                    ]
+                                                }
+                                            ]
+                                        },
+                                        "actions": {
+                                            "Set_variable_3": {
+                                                "type": "SetVariable",
+                                                "inputs": {
+                                                    "name": "importCompleted",
+                                                    "value": true
+                                                }
+                                            }
+                                        },
+                                        "else": {
+                                            "actions": {
+                                                "Set_variable_4": {
+                                                    "type": "SetVariable",
+                                                    "inputs": {
+                                                        "name": "importCompleted",
+                                                        "value": false
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "Set_variable": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "Complete_the_message_in_a_queue": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            },
+                            "Delete_csv_File": {
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                        }
+                                    },
+                                    "method": "delete",
+                                    "headers": {
+                                        "SkipDeleteIfFileNotFoundOnServer": false
+                                    },
+                                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('storage_account')))}/files/@{encodeURIComponent(encodeURIComponent(concat(parameters('sa_3pl_container'),'/',body('Parse_JSON_1')['DataFilePath'])))}"
+                                },
+                                "metadata": {
+                                    "JTJmZHluYW1pY3MzNjVmb2RhdGFleGNoYW5nZSUyZkltcG9ydCUyZkEwMTAlMmYzUEwlMmZQYWNraW5nU2xpcEltcG9ydCUyZkFyY2VzZSUyZjNQTENTVkZpbGVzVG9Qcm9jZXNzJTJmRlJPTV9XTVNfRERUX09VVEJPVU5EXzIwMjUxMTAzMTM1NjAwLnR4dA==": "/dynamics365fodataexchange/Import/A010/3PL/PackingSlipImport/Arcese/3PLCSVFilesToProcess/FROM_WMS_DDT_OUTBOUND_20251103135600.txt"
+                                }
+                            },
+                            "Condition": {
+                                "type": "If",
+                                "expression": {
+                                    "and": [
+                                        {
+                                            "equals": [
+                                                "@variables('Execution status')",
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "actions": {
+                                    "Delete_blob_(V2)": {
+                                        "type": "ApiConnection",
+                                        "inputs": {
+                                            "host": {
+                                                "connection": {
+                                                    "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                }
+                                            },
+                                            "method": "delete",
+                                            "headers": {
+                                                "SkipDeleteIfFileNotFoundOnServer": false
+                                            },
+                                            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('storage_account')))}/files/@{encodeURIComponent(encodeURIComponent(outputs('CreateZipFromBlobPaths')?['body']?['ZipFilePath']))}"
+                                        }
+                                    }
+                                },
+                                "else": {
+                                    "actions": {
+                                        "Send_an_email_(V2)_1": {
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['office365']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "body": {
+                                                    "To": "@body('Get_notification_distribution_list')?['value']",
+                                                    "Subject": "Notifications - Logic App FAILED - @{workflow().name}",
+                                                    "Body": "<p class=\"editor-paragraph\">Logic App Run Failed<br><br>Run Id: @{concat('https://portal.azure.com/#blade/Microsoft_Azure_EMA/LogicAppsMonitorBlade/runid/', encodeUriComponent(workflow().run.id))}<br>When: @{utcNow()}</p><br><p class=\"editor-paragraph\">The DMF import has failed.<br>Execution ID: @{body('ImportFromPackage')?['value']}<br>You can review the job in Dynamics 365 Finance &amp; Operations here:</p><p class=\"editor-paragraph\">@{outputs('Compose_FO_execution_url')}</p><br>",
+                                                    "Importance": "Normal"
+                                                },
+                                                "path": "/v2/Mail"
+                                            },
+                                            "runAfter": {
+                                                "Compose_FO_execution_url": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        },
+                                        "Get_notification_distribution_list": {
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "get",
+                                                "path": "/secrets/@{encodeURIComponent('notification-distribution-list')}/value"
+                                            },
+                                            "runtimeConfiguration": {
+                                                "secureData": {
+                                                    "properties": [
+                                                        "inputs",
+                                                        "outputs"
+                                                    ]
+                                                }
+                                            }
+                                        },
+                                        "Compose_FO_execution_url": {
+                                            "type": "Compose",
+                                            "inputs": "@concat(parameters('D365FOURL'),'/?mi=DMFStagingExecutionHistory&cmp=',body('Parse_JSON_1')['Company'])",
+                                            "runAfter": {
+                                                "Get_notification_distribution_list": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        },
+                                        "Delete_blob_(V2)_1": {
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "delete",
+                                                "headers": {
+                                                    "SkipDeleteIfFileNotFoundOnServer": false
+                                                },
+                                                "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('storage_account')))}/files/@{encodeURIComponent(encodeURIComponent(outputs('CreateZipFromBlobPaths')?['body']?['ZipFilePath']))}"
+                                            },
+                                            "runAfter": {
+                                                "Send_an_email_(V2)_1": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        },
+                                        "Terminate_1": {
+                                            "type": "Terminate",
+                                            "inputs": {
+                                                "runStatus": "Failed"
+                                            },
+                                            "runAfter": {
+                                                "Delete_blob_(V2)_1": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "Until": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            }
+                        },
+                        "else": {
+                            "actions": {}
+                        },
+                        "runAfter": {
+                            "CreateZipFromBlobPaths": [
+                                "Succeeded"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Initialize_variables": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Catch": {
+                "type": "Scope",
+                "actions": {
+                    "Get_notification_list": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('notification-distribution-list')}/value"
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs",
+                                    "outputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Compose_run_Id_URL": {
+                        "type": "Compose",
+                        "inputs": "@concat('https://portal.azure.com/#blade/Microsoft_Azure_EMA/LogicAppsMonitorBlade/runid/', encodeUriComponent(workflow().run.id))",
+                        "runAfter": {
+                            "Get_notification_list": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Filter_array": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@result('Try')",
+                            "where": "@or(equals(item()?['status'],'Failed'), equals(item()?['status'],'TimedOut'), equals(item()?['status'],'Skipped'))"
+                        },
+                        "runAfter": {
+                            "Compose_run_Id_URL": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Send_an_email_(V2)": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['office365']['connectionId']"
+                                }
+                            },
+                            "method": "post",
+                            "body": {
+                                "To": "@body('Get_notification_list')?['value']",
+                                "Subject": "Notifications - Logic App FAILED - @{workflow().name}",
+                                "Body": "<p class=\"editor-paragraph\">Logic App Run Failed<br><br>Run Id: @{outputs('Compose_run_Id_URL')}<br>When: @{utcNow()}<br><br>Failed actions:@{ body('Filter_array')?[0]?['error']?['message']}</p>",
+                                "Importance": "Normal"
+                            },
+                            "path": "/v2/Mail"
+                        },
+                        "runAfter": {
+                            "Filter_array": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Terminate": {
+                        "type": "Terminate",
+                        "inputs": {
+                            "runStatus": "Failed"
+                        },
+                        "runAfter": {
+                            "Send_an_email_(V2)": [
+                                "Succeeded"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Try": [
+                        "TimedOut",
+                        "Skipped",
+                        "Failed"
+                    ]
+                }
+            },
+            "Initialize_variables": {
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "Execution status",
+                            "type": "string",
+                            "value": "NotRun"
+                        },
+                        {
+                            "name": "importCompleted",
+                            "type": "boolean",
+                            "value": false
+                        }
+                    ]
+                },
+                "runAfter": {}
+            }
+        },
+        "parameters": {
+            "storage_account": {
+                "defaultValue": "atfa365sacst01",
+                "type": "String"
+            },
+            "sa_3pl_container": {
+                "defaultValue": "dynamics365fodataexchange",
+                "type": "String"
+            },
+            "D365FOURL": {
+                "defaultValue": "https://atf-a365-cst.sandbox.operations.eu.dynamics.com",
+                "type": "String"
+            },
+            "Tenant": {
+                "defaultValue": "6cfb5c6a-c8a6-4e24-a04c-a65e7a7e5d7d",
+                "type": "String"
+            },
+            "company_list": {
+                "defaultValue": [
+                    "A010"
+                ],
+                "type": "Array"
+            },
+            "3pl_import_rootfolder": {
+                "defaultValue": "Import/",
+                "type": "String"
+            },
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "servicebus": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/servicebus",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/servicebus",
+                    "connectionName": "servicebus",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "azureblob": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/azureblob",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/azureblob-2",
+                    "connectionName": "azureblob",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "keyvault": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/keyvault",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/keyvault-1",
+                    "connectionName": "keyvault",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "office365": {
+                    "id": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/providers/Microsoft.Web/locations/westeurope/managedApis/office365",
+                    "connectionId": "/subscriptions/c6b626ca-6a09-42e3-960a-102d588321c8/resourceGroups/atf-a365-rg-middleware-cst/providers/Microsoft.Web/connections/office365-2",
+                    "connectionName": "office365",
+                    "connectionProperties": {}
+                }
+            }
+        }
+    }
+}
